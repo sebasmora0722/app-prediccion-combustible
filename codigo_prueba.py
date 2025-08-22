@@ -40,8 +40,21 @@ from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 
-st.set_page_config(page_title="Predicción de Combustible - EDS ARAUCA", layout="wide")
+st.set_page_config(
+    page_title="Predicción de Combustible - EDS ARAUCA",
+    page_icon="static/icon-192.png",   # usa tu logo como ícono
+    layout="wide"
+)
+
+# 🔗 Inyectar manifest, iconos y color de tema
+st.markdown("""
+<link rel="manifest" href="/static/manifest.webmanifest" type="application/manifest+json">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="theme-color" content="#FF6600">
+""", unsafe_allow_html=True)
+
 st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
+
 
 import streamlit as st
 from time import time
