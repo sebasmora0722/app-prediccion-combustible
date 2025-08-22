@@ -113,6 +113,32 @@ def require_basic_login():
 require_basic_login()
 # ================== FIN LOGIN SIMPLE ==================
 
+import streamlit as st
+from streamlit.components.v1 import html
+
+# (opcional) usa uno de los íconos como page_icon
+st.set_page_config(
+    page_title="Predicción de Combustible - EDS",
+    page_icon="static/icon-192.png",
+    layout="wide"
+)
+
+# Inyecta manifest y registra el service worker
+html("""
+<link rel="manifest" href="/static/manifest.webmanifest">
+<meta name="theme-color" content="#FF6600">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/static/service-worker.js')
+        .catch(err => console.log('SW registration failed:', err));
+    });
+  }
+</script>
+""", height=0)
+
+
+
 @st.cache_data
 def cargar_datos_turnos():
     df = pd.read_excel("turnos_preprocesado.xlsx")
