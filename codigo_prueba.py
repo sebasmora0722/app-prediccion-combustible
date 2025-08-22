@@ -207,23 +207,21 @@ def stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque):
     return su_prod
 
 
-def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=True):
+def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=False):
     """
     Resta día a día el consumo del PRODUCTO (sumando sus tanques) hasta agotar el stock útil.
     Devuelve:
       - df_cov con columnas:
           Producto,
           StockUtilInicial (gal),
-          Cobertura_dias (incluye_hoy?),
-          Rango_cubierto_completo (YYYY-MM-DD → YYYY-MM-DD),
+          Cobertura_dias (contando desde mañana si incluir_hoy=False),
+          Rango_cubierto_completo,
           Fecha_agotamiento (día en que se acaba durante el día o '✔️ Cubierto')
-      - fechas_pedido (dict {producto: fecha_agotamiento - 1 día} o None)
-    Nota: si incluir_hoy=True, el conteo empieza en hoy; si False, empieza mañana.
+      - fechas_pedido (dict {producto: fecha_agotamiento} o None)
     """
     hoy = pd.to_datetime("today").normalize().date()
     fecha_inicio = hoy if incluir_hoy else (hoy + pd.Timedelta(days=1)).date()
 
-    # Serie diaria por producto (ordenada)
     cons_prod = (
         df_pred_tanques[df_pred_tanques["Fecha"] >= pd.to_datetime(fecha_inicio)]
         .groupby(["Fecha","Producto"])["Predicción (galones)"]
@@ -231,7 +229,6 @@ def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=
     )
 
     out_rows, fechas_pedido = [], {}
-    # horizonte visible (por si no se agota)
     horizonte = cons_prod["Fecha"].dt.date.max() if not cons_prod.empty else fecha_inicio
 
     for prod in ["ACPM","CORRIENTE","SUPREME"]:
@@ -248,19 +245,17 @@ def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=
                 fecha_agot = pd.to_datetime(r["Fecha"]).date()
                 break
 
-        # Rango cubierto COMPLETO es hasta el día anterior al agotamiento
         if fecha_agot:
             fin_completo = fecha_agot - pd.Timedelta(days=1)
             rango_txt = f"{fecha_inicio} → {fin_completo}"
-            cov_txt = f"{dias} (incluye hoy)" if incluir_hoy else f"{dias} (desde mañana)"
-            fechas_pedido[prod] = fecha_agot - pd.Timedelta(days=1)
+            cov_txt = f"{dias} días"   # <<-- ahora no dice "incluye hoy"
+            fechas_pedido[prod] = fecha_agot   # <<-- usamos fecha exacta de agotamiento
             agot_txt = str(fecha_agot)
         else:
             fin_completo = horizonte
             rango_txt = f"{fecha_inicio} → {fin_completo}"
-            # si no se agota, mostramos “≥ N” días (N = días simulados disponibles)
             dias_disp = (fin_completo - fecha_inicio).days + 1
-            cov_txt = f"≥ {dias_disp} " + ("(incluye hoy)" if incluir_hoy else "(desde mañana)")
+            cov_txt = f"≥ {dias_disp} días"
             fechas_pedido[prod] = None
             agot_txt = "✔️ Cubierto en el horizonte"
 
@@ -273,6 +268,7 @@ def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=
         })
 
     return pd.DataFrame(out_rows), fechas_pedido
+
 
 
 def deficits_hasta_objetivo(
