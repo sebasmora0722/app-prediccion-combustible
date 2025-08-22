@@ -248,7 +248,8 @@ def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=
         if fecha_agot:
             fin_completo = fecha_agot - pd.Timedelta(days=1)
             rango_txt = f"{fecha_inicio} → {fin_completo}"
-            cov_txt = f"{dias} días"   # <<-- ahora no dice "incluye hoy"
+            cov_txt = f"{max(dias-1,0)} días"
+   
             fechas_pedido[prod] = fecha_agot   # <<-- usamos fecha exacta de agotamiento
             agot_txt = str(fecha_agot)
         else:
