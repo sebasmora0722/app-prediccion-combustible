@@ -40,23 +40,6 @@ from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 
-import streamlit as st
-
-st.set_page_config(
-    page_title="EDS ARAUCA MZL",
-    page_icon="static/icon-192.png",  # usa el de /static/
-    layout="wide"
-)
-
-# Inyecta manifest + apple icon + theme-color (RUTA ABSOLUTA con /static/)
-st.markdown("""
-<link rel="manifest" href="/static/manifest.webmanifest" type="application/manifest+json">
-<link rel="apple-touch-icon" href="/static/icon-192.png">
-<meta name="theme-color" content="#FF6600">
-""", unsafe_allow_html=True)
-
-
-
 st.set_page_config(page_title="Predicción de Combustible - EDS ARAUCA", layout="wide")
 st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
 
