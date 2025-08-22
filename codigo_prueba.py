@@ -53,7 +53,7 @@ def _get_users_from_secrets():
     """
     Espera en st.secrets algo así:
     [auth]
-    usuarios = "sebas:Sebitas12, liliana:1234, yane:5678"
+    usuarios = "sebas:Sebitas12, liliana:lili123*, yaneth:yaneth123*, mery:mery123*"
     # (opcional) minutos de inactividad para cerrar sesión
     timeout_minutes = 60
     """
