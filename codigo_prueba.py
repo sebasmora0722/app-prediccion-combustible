@@ -85,7 +85,7 @@ def require_basic_login():
             st.session_state._last_touch = time()
 
     if not st.session_state.logged_in:
-        st.title("🔐 Acceso restringido")
+        st.title("Inicia Sesion")
         user = st.text_input("Usuario")
         pwd = st.text_input("Contraseña", type="password")
         col1, col2 = st.columns([1,3])
