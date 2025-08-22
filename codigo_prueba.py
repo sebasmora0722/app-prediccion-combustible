@@ -1,4 +1,4 @@
-# --- BOOTSTRAP DE RUTAS (pegar al inicio del archivo) ---
+
 from pathlib import Path
 import shutil
 
@@ -6,14 +6,14 @@ ROOT = Path(__file__).parent
 DATA = ROOT / "data"
 MODELS = ROOT / "modelos"
 
-# Archivos que tu código podría estar buscando "en la raíz"
+
 legacy_map = {
     # Excels
     "turnos_preprocesado.xlsx": DATA / "turnos_preprocesado.xlsx",
     "tanques_preprocesado.xlsx": DATA / "tanques_preprocesado.xlsx",
     "Capacidades tanques.xlsx": DATA / "Capacidades tanques.xlsx",
-    "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          # si aplica
-    "aforos_unificado.xlsx": DATA / "aforos_unificado.xlsx",                                # si aplica
+    "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          
+    "aforos_unificado.xlsx": DATA / "aforos_unificado.xlsx",                               
 
     # Modelos
     "modelo_predictivo_turnos_reentrenado.pkl": MODELS / "modelo_predictivo_turnos_reentrenado.pkl",
@@ -24,12 +24,12 @@ for legacy_name, real_path in legacy_map.items():
     legacy_path = ROOT / legacy_name
     try:
         if not legacy_path.exists() and real_path.exists():
-            # copia (no symlink para evitar permisos en la nube)
+            
             shutil.copy2(real_path, legacy_path)
     except Exception:
-        # No rompemos la app si algo de esto falla
+        
         pass
-# --- FIN BOOTSTRAP ---
+
 
 import streamlit as st
 import pandas as pd
@@ -42,7 +42,7 @@ from pathlib import Path
 
 
 
-# ===================== CONFIG =====================
+
 st.set_page_config(page_title="Predicción de Combustible - EDS ARAUCA", layout="wide")
 st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
 
@@ -54,7 +54,7 @@ def cargar_datos_turnos():
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     df = df.sort_values(by=["Producto", "Turno", "Fecha"]).reset_index(drop=True)
 
-    # Features por producto/turno
+    
     df["Lag_1"] = df.groupby(["Producto", "Turno"])["Galones"].shift(1)
     df["MediaMovil_3"] = (
         df.groupby(["Producto", "Turno"])["Galones"]
@@ -73,7 +73,7 @@ def cargar_datos_tanques():
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     df = df.sort_values(by=["Producto", "Tanque", "Fecha"]).reset_index(drop=True)
 
-    # Features por producto/tanque
+    
     df["Lag_1"] = df.groupby(["Producto", "Tanque"])["Galones"].shift(1)
     df["MediaMovil_3"] = (
         df.groupby(["Producto", "Tanque"])["Galones"]
@@ -160,7 +160,7 @@ def generar_pred_por_tanques(df_tanques_hist, modelo_tanques, fecha_inicio, dias
             hb = base[base["Producto"] == prod]
             if hb.empty:
                 continue
-            # SOLO los tanques que existen para ese producto
+            
             tanques_prod = sorted(hb["Tanque"].unique().tolist())
             for tq in tanques_prod:
                 ht = hb[hb["Tanque"] == tq]
@@ -179,7 +179,7 @@ def generar_pred_por_tanques(df_tanques_hist, modelo_tanques, fecha_inicio, dias
                 y = float(modelo_tanques.predict(X)[0])
                 preds.append({"Fecha": f, "Producto": prod, "Tanque": tq, "Predicción (galones)": round(y, 2)})
 
-                # auto-regresivo
+                
                 base = pd.concat([base, pd.DataFrame([{
                     "Fecha": f, "Producto": prod, "Tanque": tq, "Galones": y
                 }])], ignore_index=True)
@@ -201,7 +201,7 @@ def stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque):
         minimo = float(minimos_por_tanque.get(tq, 0.0))
         su = max(gal - minimo - float(buffer_tanque), 0.0)
         su_prod[prod] = su_prod.get(prod, 0.0) + su
-    # Aseguramos las 3 llaves:
+    
     for p in ["ACPM","CORRIENTE","SUPREME"]:
         su_prod.setdefault(p, 0.0)
     return su_prod
@@ -250,7 +250,7 @@ def cobertura_exacta_por_producto(df_pred_tanques, su_por_producto, incluir_hoy=
             rango_txt = f"{fecha_inicio} → {fin_completo}"
             cov_txt = f"{max(dias-1,0)} días"
    
-            fechas_pedido[prod] = fecha_agot   # <<-- usamos fecha exacta de agotamiento
+            fechas_pedido[prod] = fecha_agot   
             agot_txt = str(fecha_agot)
         else:
             fin_completo = horizonte
@@ -306,9 +306,9 @@ def deficits_hasta_objetivo(
         )
 
     hoy = pd.to_datetime("today").normalize()
-    # Horizonte disponible por predicción
+    
     pred_hasta = pd.to_datetime(df_pred_tanques["Fecha"]).max().normalize()
-    # Fecha objetivo
+    
     if dias_objetivo is None:
         dias_objetivo = 0
     if lead_time is None:
@@ -318,7 +318,7 @@ def deficits_hasta_objetivo(
     else:
         fecha_obj = min(pred_hasta, hoy + pd.Timedelta(days=int(lead_time) + int(dias_objetivo)))
 
-    # --- Stock útil inicial por tanque ---
+    
     su_rows = []
     for _, r in df_inv_actual.iterrows():
         tq   = str(r["Tanque"])
@@ -329,14 +329,14 @@ def deficits_hasta_objetivo(
         su_rows.append([tq, prod, su_ini])
     df_su = pd.DataFrame(su_rows, columns=["Tanque","Producto","StockUtilInicial"])
 
-    # --- Consumo acumulado por tanque hasta la fecha objetivo ---
+    
     df_cons = (
         df_pred_tanques[df_pred_tanques["Fecha"] <= fecha_obj]
         .groupby(["Tanque","Producto"])["Predicción (galones)"].sum()
         .rename("ConsumoAcum").reset_index()
     )
 
-    # --- Tabla por TANQUE ---
+    
     df_def = (
         df_su.merge(df_cons, on=["Tanque","Producto"], how="left")
              .fillna({"ConsumoAcum": 0.0})
@@ -344,7 +344,7 @@ def deficits_hasta_objetivo(
     df_def["StockUtilProy"] = df_def["StockUtilInicial"] - df_def["ConsumoAcum"]
     df_def["Deficit"]       = df_def["StockUtilProy"].apply(lambda x: -x if x < 0 else 0.0)
 
-    # --- Requerimiento por PRODUCTO con bandeo conservador ---
+    
     req_por_prod = {}
     for p in ["ACPM", "CORRIENTE", "SUPREME"]:
         dfp = df_def[df_def["Producto"] == p]
@@ -353,7 +353,7 @@ def deficits_hasta_objetivo(
             continue
 
         negativos = float(dfp[dfp["StockUtilProy"] < 0]["Deficit"].sum())
-        # Solo se cede lo que deja al tanque positivo por encima de la reserva operativa
+        
         positivos_seg = float(
             dfp[dfp["StockUtilProy"] > 0]["StockUtilProy"].apply(
                 lambda su: max(su - float(reserva_operativa_gal), 0.0)
@@ -361,7 +361,7 @@ def deficits_hasta_objetivo(
         )
         req_por_prod[p] = max(0.0, negativos - positivos_seg)
 
-    # Orden para visualizar tanques urgentes
+    
     df_def = df_def.sort_values(
         ["Producto", "Deficit", "StockUtilProy"],
         ascending=[True, False, True]
@@ -438,17 +438,17 @@ def plan_carrotanque_3_comp(
     comp_index = 1
     for cap in caps:
         choice = None
-        # 1ª ronda: asegurar mínimo un compartimiento por producto en déficit
+        
         restantes = [p for p in orden_productos if p not in productos_servidos]
         if restantes:
             for prod in restantes:
                 choice = pick_top_deficit_by_product(cap, prod, avoid_repeat_tank=True)
                 if choice: break
-        # 2ª: mayor déficit (evitando repetir tanque si se puede)
+        
         if not choice: choice = pick_top_deficit_any(cap, avoid_repeat_tank=True)
-        # 3ª: permitir repetir tanque solo si no hay otra opción
+        
         if not choice: choice = pick_top_deficit_any(cap, avoid_repeat_tank=False)
-        # 4ª: rotación si ya no hay déficit
+        
         if not choice: choice = pick_by_rotation(cap)
 
         if not choice:
@@ -663,14 +663,14 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
 
   
-# Llamada al dashboard (muéstralo bien arriba, antes de los expanders)
+
 resumen_estado_actual_ui(pred_dias_default=14)
 
 
-# ===================== 📈 Bienvenida — Precisión del modelo (tanques, auto) =====================
-# Muestra de inmediato (sin botones) la precisión del modelo de TANQUES en los últimos 14 días con datos reales.
+# ===================== 📈 Bienvenida — Precisión del modelo =====================
 
-# 1) Reales por TANQUES (Fecha + Producto)
+
+
 reales_base = (
     df_tanques.groupby(["Fecha","Producto"])["Galones"]
     .sum().reset_index().rename(columns={"Galones":"Real"})
@@ -679,12 +679,12 @@ reales_base = (
 if reales_base.empty:
     st.info("No hay datos históricos por tanques para evaluar precisión.")
 else:
-    # 2) Ventana de 14 días anclada al último día con real
+    
     fin_bt = pd.to_datetime(reales_base["Fecha"]).max().normalize()
     ini_bt = fin_bt - pd.Timedelta(days=13)  # incluye fin_bt
     reales_14 = reales_base[(reales_base["Fecha"] >= ini_bt) & (reales_base["Fecha"] <= fin_bt)].copy()
 
-    # 3) Predicción AUTO por TANQUES para EXACTAMENTE ese rango (sin usar session_state)
+    
     try:
         dias_bt = (fin_bt - ini_bt).days + 1
         pred_bt = generar_pred_por_tanques(df_tanques, modelo_tanques, ini_bt, dias_bt)
@@ -695,19 +695,19 @@ else:
     if pred_bt.empty:
         st.info("No se generaron predicciones para el rango de backtest.")
     else:
-        # 4) Agregar pred por Fecha+Producto (sumando TANQUES)
+        
         pred_prod = (
             pred_bt.groupby(["Fecha","Producto"])["Predicción (galones)"]
                   .sum().reset_index().rename(columns={"Predicción (galones)":"Pred"})
         )
 
-        # 5) Unir Reales vs Pred
+        
         eval_df = reales_14.merge(pred_prod, on=["Fecha","Producto"], how="inner").sort_values(["Producto","Fecha"])
 
         if eval_df.empty:
             st.info("No hay intersección entre reales y predicción en el backtest.")
         else:
-            # 6) Métricas de error
+            
             eval_df["Residuo"]  = eval_df["Pred"] - eval_df["Real"]
             eval_df["AbsError"] = (eval_df["Pred"] - eval_df["Real"]).abs()
             eval_df["RelError"] = eval_df.apply(
@@ -719,7 +719,7 @@ else:
                 eval_df.groupby("Producto")["RelError"]
                        .mean().mul(100).rename("MRE_%").reset_index()
             )
-            # MAPE general (solo filas con Real>0)
+            
             eval_pos = eval_df[eval_df["Real"] > 0].copy()
             mape_total = float(eval_pos["AbsError"].div(eval_pos["Real"]).mean() * 100) if not eval_pos.empty else None
 
@@ -885,7 +885,7 @@ with st.expander("🔮 Predicción por Tanques"):
         st.success("✅ Predicción generada con éxito")
         st.dataframe(df_pred.sort_values(["Fecha","Producto","Tanque"]), use_container_width=True)
 
-        # Totales por TANQUE (lo que pediste: 6, 7, 3, 5, Supreme, etc.)
+        
         tot_por_tanque = (
             df_pred.groupby("Tanque")["Predicción (galones)"]
             .sum().reset_index()
@@ -895,7 +895,7 @@ with st.expander("🔮 Predicción por Tanques"):
         st.subheader(f"🧮 Consumo total por tanque en {dias_tq} días")
         st.dataframe(tot_por_tanque, use_container_width=True)
 
-        # (Opcional) Totales por producto
+        
         tot_por_producto = (
             df_pred.groupby("Producto")["Predicción (galones)"]
             .sum().reset_index()
@@ -905,7 +905,7 @@ with st.expander("🔮 Predicción por Tanques"):
         st.subheader(f"🧮 Consumo total por producto en {dias_tq} días")
         st.dataframe(tot_por_producto, use_container_width=True)
 
-        # Guardamos para el siguiente paso
+        
         st.session_state["df_pred_tanques"] = df_pred
         st.session_state["tot_por_tanque"] = tot_por_tanque
         st.session_state["tot_por_producto"] = tot_por_producto
@@ -946,7 +946,7 @@ def convertir_cm_a_galones(tanque: str, medida_cm: float, producto: str) -> floa
     if tabla is None or "Milimetros" not in tabla.columns or "Galones" not in tabla.columns:
         return 0.0
 
-    # Valor a buscar (x) según producto
+    
     is_supreme = str(producto).upper().strip() in ["SUPREME", "MAX PRO", "SUPREME MAX PRO"]
     x = float(medida_cm) if is_supreme else float(medida_cm) * 10.0  # cm→mm para ACPM/CTE
 
@@ -954,13 +954,13 @@ def convertir_cm_a_galones(tanque: str, medida_cm: float, producto: str) -> floa
     if tabla.empty:
         return 0.0
 
-    # Fuera de rango → extremos
+    
     if x <= float(tabla["Milimetros"].min()):
         return float(tabla["Galones"].iloc[0])
     if x >= float(tabla["Milimetros"].max()):
         return float(tabla["Galones"].iloc[-1])
 
-    # Interpolación lineal entre los dos puntos vecinos
+    
     lo = tabla[tabla["Milimetros"] <= x].iloc[-1]
     hi = tabla[tabla["Milimetros"] >= x].iloc[0]
     if float(hi["Milimetros"]) == float(lo["Milimetros"]):
@@ -974,7 +974,7 @@ def convertir_cm_a_galones(tanque: str, medida_cm: float, producto: str) -> floa
 
 
 with st.expander("📝 Ingreso diario de medidas de tanques"):
-    # Asegurar archivo de inventario
+    
     if not os.path.exists("inventario_actual.csv"):
         _ = cargar_inventario_actual()
 
@@ -991,7 +991,7 @@ with st.expander("📝 Ingreso diario de medidas de tanques"):
     with col3:
         medida_cm = st.number_input("Medida actual (cm)", min_value=0.0, step=0.1)
 
-    # Detectar producto desde inventario
+    
     if not df_inv_actual[df_inv_actual["Tanque"] == tanque].empty:
         producto = df_inv_actual.loc[df_inv_actual["Tanque"] == tanque, "Producto"].iloc[0]
         st.info(f"Producto detectado: **{producto}**")
@@ -1015,7 +1015,7 @@ with st.expander("📝 Ingreso diario de medidas de tanques"):
 
 
 with st.expander("🧯 Cobertura exacta y fecha de pedido (lead time = 1 día)"):
-    # 1) Predicción LOCAL para cobertura (NO depende del slicer)
+    
     try:
         inicio_cov = pd.to_datetime("today").normalize()
         df_pred_cov = generar_pred_por_tanques(df_tanques, modelo_tanques, inicio_cov, 14)  # puedes ajustar 14 si quieres
