@@ -1,3 +1,35 @@
+# --- BOOTSTRAP DE RUTAS (pegar al inicio del archivo) ---
+from pathlib import Path
+import shutil
+
+ROOT = Path(__file__).parent
+DATA = ROOT / "data"
+MODELS = ROOT / "modelos"
+
+# Archivos que tu código podría estar buscando "en la raíz"
+legacy_map = {
+    # Excels
+    "turnos_preprocesado.xlsx": DATA / "turnos_preprocesado.xlsx",
+    "tanques_preprocesado.xlsx": DATA / "tanques_preprocesado.xlsx",
+    "configuracion_tanques.xlsx": DATA / "configuracion_tanques.xlsx",  # si aplica
+    "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          # si aplica
+    "aforos.xlsx": DATA / "aforos.xlsx",                                # si aplica
+
+    # Modelos
+    "modelo_predictivo_turnos_reentrenado.json": MODELS / "modelo_predictivo_turnos_reentrenado.json",
+    "modelo_predictivo_tanques_reentrenado.json": MODELS / "modelo_predictivo_tanques_reentrenado.json",
+}
+
+for legacy_name, real_path in legacy_map.items():
+    legacy_path = ROOT / legacy_name
+    try:
+        if not legacy_path.exists() and real_path.exists():
+            # copia (no symlink para evitar permisos en la nube)
+            shutil.copy2(real_path, legacy_path)
+    except Exception:
+        # No rompemos la app si algo de esto falla
+        pass
+# --- FIN BOOTSTRAP ---
 
 import streamlit as st
 import pandas as pd
