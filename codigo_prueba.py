@@ -40,6 +40,20 @@ from datetime import timedelta, datetime, timezone
 from pathlib import Path
 
 
+import streamlit as st
+
+st.set_page_config(
+    page_title="EDS ARAUCA MZL",
+    page_icon="static/icon-192.png",  # usa el de /static/
+    layout="wide"
+)
+
+# Inyecta manifest + apple icon + theme-color (RUTA ABSOLUTA con /static/)
+st.markdown("""
+<link rel="manifest" href="/static/manifest.webmanifest" type="application/manifest+json">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<meta name="theme-color" content="#FF6600">
+""", unsafe_allow_html=True)
 
 
 
@@ -113,29 +127,7 @@ def require_basic_login():
 require_basic_login()
 # ================== FIN LOGIN SIMPLE ==================
 
-import streamlit as st
-from streamlit.components.v1 import html
 
-# (opcional) usa uno de los íconos como page_icon
-st.set_page_config(
-    page_title="Predicción de Combustible - EDS",
-    page_icon="static/icon-192.png",
-    layout="wide"
-)
-
-# Inyecta manifest y registra el service worker
-html("""
-<link rel="manifest" href="/static/manifest.webmanifest">
-<meta name="theme-color" content="#FF6600">
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/static/service-worker.js')
-        .catch(err => console.log('SW registration failed:', err));
-    });
-  }
-</script>
-""", height=0)
 
 
 
