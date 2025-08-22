@@ -11,13 +11,13 @@ legacy_map = {
     # Excels
     "turnos_preprocesado.xlsx": DATA / "turnos_preprocesado.xlsx",
     "tanques_preprocesado.xlsx": DATA / "tanques_preprocesado.xlsx",
-    "configuracion_tanques.xlsx": DATA / "configuracion_tanques.xlsx",  # si aplica
+    "Capacidades tanques.xlsx": DATA / "Capacidades tanques.xlsx",
     "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          # si aplica
-    "aforos.xlsx": DATA / "aforos.xlsx",                                # si aplica
+    "aforos_unificado.xlsx": DATA / "aforos_unificado.xlsx",                                # si aplica
 
     # Modelos
-    "modelo_predictivo_turnos_reentrenado.json": MODELS / "modelo_predictivo_turnos_reentrenado.json",
-    "modelo_predictivo_tanques_reentrenado.json": MODELS / "modelo_predictivo_tanques_reentrenado.json",
+    "modelo_predictivo_turnos_reentrenado.pkl": MODELS / "modelo_predictivo_turnos_reentrenado.pkl",
+    "modelo_predictivo_tanques_reentrenado.pkl": MODELS / "modelo_predictivo_tanques_reentrenado.pkl",
 }
 
 for legacy_name, real_path in legacy_map.items():
