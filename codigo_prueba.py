@@ -1,4 +1,51 @@
-# ================== LOGIN SIMPLE ==================
+
+from pathlib import Path
+import shutil
+
+ROOT = Path(__file__).parent
+DATA = ROOT / "data"
+MODELS = ROOT / "modelos"
+
+
+legacy_map = {
+    # Excels
+    "turnos_preprocesado.xlsx": DATA / "turnos_preprocesado.xlsx",
+    "tanques_preprocesado.xlsx": DATA / "tanques_preprocesado.xlsx",
+    "Capacidades tanques.xlsx": DATA / "Capacidades tanques.xlsx",
+    "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          
+    "aforos_unificado.xlsx": DATA / "aforos_unificado.xlsx",                               
+
+    # Modelos
+    "modelo_predictivo_turnos_reentrenado.pkl": MODELS / "modelo_predictivo_turnos_reentrenado.pkl",
+    "modelo_predictivo_tanques_reentrenado.pkl": MODELS / "modelo_predictivo_tanques_reentrenado.pkl",
+}
+
+for legacy_name, real_path in legacy_map.items():
+    legacy_path = ROOT / legacy_name
+    try:
+        if not legacy_path.exists() and real_path.exists():
+            
+            shutil.copy2(real_path, legacy_path)
+    except Exception:
+        
+        pass
+
+
+import streamlit as st
+import pandas as pd
+import os
+import joblib
+import numpy as np
+from datetime import timedelta, datetime, timezone
+from pathlib import Path
+
+
+
+
+
+st.set_page_config(page_title="Predicción de Combustible - EDS ARAUCA", layout="wide")
+st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
+
 import streamlit as st
 from time import time
 
@@ -65,58 +112,6 @@ def require_basic_login():
 # Llamar ANTES de la lógica de la app
 require_basic_login()
 # ================== FIN LOGIN SIMPLE ==================
-
-
-
-
-from pathlib import Path
-import shutil
-
-ROOT = Path(__file__).parent
-DATA = ROOT / "data"
-MODELS = ROOT / "modelos"
-
-
-legacy_map = {
-    # Excels
-    "turnos_preprocesado.xlsx": DATA / "turnos_preprocesado.xlsx",
-    "tanques_preprocesado.xlsx": DATA / "tanques_preprocesado.xlsx",
-    "Capacidades tanques.xlsx": DATA / "Capacidades tanques.xlsx",
-    "inventario_actual.xlsx": DATA / "inventario_actual.xlsx",          
-    "aforos_unificado.xlsx": DATA / "aforos_unificado.xlsx",                               
-
-    # Modelos
-    "modelo_predictivo_turnos_reentrenado.pkl": MODELS / "modelo_predictivo_turnos_reentrenado.pkl",
-    "modelo_predictivo_tanques_reentrenado.pkl": MODELS / "modelo_predictivo_tanques_reentrenado.pkl",
-}
-
-for legacy_name, real_path in legacy_map.items():
-    legacy_path = ROOT / legacy_name
-    try:
-        if not legacy_path.exists() and real_path.exists():
-            
-            shutil.copy2(real_path, legacy_path)
-    except Exception:
-        
-        pass
-
-
-import streamlit as st
-import pandas as pd
-import os
-import joblib
-import numpy as np
-from datetime import timedelta, datetime, timezone
-from pathlib import Path
-
-
-
-
-
-st.set_page_config(page_title="Predicción de Combustible - EDS ARAUCA", layout="wide")
-st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
-
-
 
 @st.cache_data
 def cargar_datos_turnos():
