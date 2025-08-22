@@ -1,3 +1,73 @@
+# ================== LOGIN SIMPLE ==================
+import streamlit as st
+from time import time
+
+def _get_users_from_secrets():
+    """
+    Espera en st.secrets algo así:
+    [auth]
+    usuarios = "sebas:Sebitas12, liliana:1234, yane:5678"
+    # (opcional) minutos de inactividad para cerrar sesión
+    timeout_minutes = 60
+    """
+    cfg = st.secrets.get("auth", {})
+    raw = cfg.get("usuarios", "")
+    pares = [p.strip() for p in raw.split(",") if p.strip()]
+    users = {}
+    for par in pares:
+        if ":" in par:
+            u, p = par.split(":", 1)
+            users[u.strip()] = p.strip()
+    timeout = int(cfg.get("timeout_minutes", 60))
+    return users, timeout
+
+def require_basic_login():
+    users, timeout_minutes = _get_users_from_secrets()
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+        st.session_state.user = None
+        st.session_state._last_touch = time()
+
+    # auto-logout por inactividad
+    if st.session_state.logged_in:
+        if time() - st.session_state._last_touch > timeout_minutes * 60:
+            st.session_state.clear()
+            st.warning("Sesión cerrada por inactividad.")
+            st.stop()
+        else:
+            st.session_state._last_touch = time()
+
+    if not st.session_state.logged_in:
+        st.title("🔐 Acceso restringido")
+        user = st.text_input("Usuario")
+        pwd = st.text_input("Contraseña", type="password")
+        col1, col2 = st.columns([1,3])
+        with col1:
+            if st.button("Entrar", use_container_width=True):
+                if user in users and pwd == users[user]:
+                    st.session_state.logged_in = True
+                    st.session_state.user = user
+                    st.session_state._last_touch = time()
+                    st.rerun()
+                else:
+                    st.error("Credenciales inválidas")
+        st.stop()
+
+    # Barra pequeña con usuario y logout
+    c1, c2, c3 = st.columns([6,3,1])
+    with c2:
+        st.caption(f"👤 {st.session_state.user}")
+    with c3:
+        if st.button("Salir"):
+            st.session_state.clear()
+            st.rerun()
+
+# Llamar ANTES de la lógica de la app
+require_basic_login()
+# ================== FIN LOGIN SIMPLE ==================
+
+
+
 
 from pathlib import Path
 import shutil
