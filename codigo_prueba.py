@@ -621,7 +621,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         else: col=c3
         with col:
             kpi_chip(f"{prod} — Stock útil", f"{su:,.0f} gal", f"Colchón por tanque: {buffer_tanque:.0f} gal")
-            kpi_chip(f"{prod} — Cobertura", str(cov_txt))
+            kpi_chip(f"{prod} — Cobertura", f"{cov_txt} (incluye hoy)")
             kpi_chip(f"{prod} — Sugerencia", f"{fechas_pedido.get(prod, None) or 'Sin urgencia'}")
 
 
