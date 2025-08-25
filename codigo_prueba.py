@@ -572,7 +572,7 @@ def kpi_chip(label, value, help_txt=None):
     return col
 
 def resumen_estado_actual_ui(pred_dias_default=4):
-    st.subheader("🏁 Estado actual de la estación")
+    st.subheader("🏁 Stock actual de combustible")
 
     # 1) Predicción LOCAL para KPIs (NO toca st.session_state["df_pred_tanques"])
     inicio = pd.to_datetime("today").normalize()
