@@ -622,7 +622,17 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         with col:
             kpi_chip(f"{prod} — Stock útil", f"{su:,.0f} gal", f"Colchón por tanque: {buffer_tanque:.0f} gal")
             kpi_chip(f"{prod} — Cobertura", f"{cov_txt} (incluye hoy)")
-            kpi_chip(f"{prod} — Sugerencia", f"{fechas_pedido.get(prod, None) or 'Sin urgencia'}")
+            fecha_agot = fechas_pedido.get(prod, None)
+            if fecha_agot:
+                fecha_sugerida = (pd.to_datetime(fecha_agot) - pd.Timedelta(days=1)).date()
+                if fecha_sugerida < pd.to_datetime("today").normalize().date():
+                    fecha_sugerida = pd.to_datetime("today").normalize().date()
+                sugerencia_txt = str(fecha_sugerida)
+            else:
+                sugerencia_txt = "Sin urgencia"
+
+            kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+
 
 
     # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
