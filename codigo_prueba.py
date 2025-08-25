@@ -6,6 +6,15 @@ ROOT = Path(__file__).parent
 DATA = ROOT / "data"
 MODELS = ROOT / "modelos"
 
+from pathlib import Path
+
+def _file_state(p: Path) -> tuple[int, int]:
+    """Clave de caché basada en (tamaño, mtime). Si no existe: (0,0)."""
+    try:
+        s = p.stat()
+        return (int(s.st_size), int(s.st_mtime_ns))
+    except Exception:
+        return (0, 0)
 
 legacy_map = {
     # Excels
@@ -124,48 +133,43 @@ require_basic_login()
 # ================== FIN LOGIN SIMPLE ==================
 
 
+with st.sidebar:
+    if st.button("🔄 Recargar datos"):
+        st.cache_data.clear()
+        st.rerun()
 
 
+
+DATA = Path(__file__).parent / "data"
 
 @st.cache_data
-def cargar_datos_turnos():
-    df = pd.read_excel("turnos_preprocesado.xlsx")
+def cargar_datos_turnos(_cache_key: tuple[int, int]):
+    path = DATA / "turnos_preprocesado.xlsx"
+    df = pd.read_excel(path)
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     df = df.sort_values(by=["Producto", "Turno", "Fecha"]).reset_index(drop=True)
-
-    
     df["Lag_1"] = df.groupby(["Producto", "Turno"])["Galones"].shift(1)
-    df["MediaMovil_3"] = (
-        df.groupby(["Producto", "Turno"])["Galones"]
-          .transform(lambda s: s.shift(1).rolling(3).mean())
-    )
-    df["MediaMovil_7"] = (
-        df.groupby(["Producto", "Turno"])["Galones"]
-          .transform(lambda s: s.shift(1).rolling(7).mean())
-    )
+    df["MediaMovil_3"] = df.groupby(["Producto", "Turno"])["Galones"].transform(lambda s: s.shift(1).rolling(3).mean())
+    df["MediaMovil_7"] = df.groupby(["Producto", "Turno"])["Galones"].transform(lambda s: s.shift(1).rolling(7).mean())
     return df
-
 
 @st.cache_data
-def cargar_datos_tanques():
-    df = pd.read_excel("tanques_preprocesado.xlsx")
+def cargar_datos_tanques(_cache_key: tuple[int, int]):
+    path = DATA / "tanques_preprocesado.xlsx"
+    df = pd.read_excel(path)
     df["Fecha"] = pd.to_datetime(df["Fecha"])
     df = df.sort_values(by=["Producto", "Tanque", "Fecha"]).reset_index(drop=True)
-
-    
     df["Lag_1"] = df.groupby(["Producto", "Tanque"])["Galones"].shift(1)
-    df["MediaMovil_3"] = (
-        df.groupby(["Producto", "Tanque"])["Galones"]
-          .transform(lambda s: s.shift(1).rolling(3).mean())
-    )
-    df["MediaMovil_7"] = (
-        df.groupby(["Producto", "Tanque"])["Galones"]
-          .transform(lambda s: s.shift(1).rolling(7).mean())
-    )
+    df["MediaMovil_3"] = df.groupby(["Producto", "Tanque"])["Galones"].transform(lambda s: s.shift(1).rolling(3).mean())
+    df["MediaMovil_7"] = df.groupby(["Producto", "Tanque"])["Galones"].transform(lambda s: s.shift(1).rolling(7).mean())
     return df
 
-df_turnos = cargar_datos_turnos()
-df_tanques = cargar_datos_tanques()
+
+_turnos_key  = _file_state(DATA / "turnos_preprocesado.xlsx")
+_tanques_key = _file_state(DATA / "tanques_preprocesado.xlsx")
+
+df_turnos  = cargar_datos_turnos(_turnos_key)
+df_tanques = cargar_datos_tanques(_tanques_key)
 
 @st.cache_resource
 def cargar_modelo_turnos():
