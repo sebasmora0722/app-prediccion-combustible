@@ -605,7 +605,20 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     df_cov, fechas_pedido = cobertura_exacta_por_producto(
         df_pred_local, su_por_prod, incluir_hoy=True
     )
-
+    cov_info = {}
+    for _, r in df_cov.iterrows():
+        p = str(r["Producto"]).strip()
+        dias_txt = str(r["Cobertura_dias"]).strip()
+        agot = None
+        if pd.notnull(r["Fecha_agotamiento"]):
+           txt_agot = str(r["Fecha_agotamiento"]).strip()
+           if "✔️" not in txt_agot:  # evitar el caso "✔️ Cubierto en el horizonte"
+               try:
+                   agot = pd.to_datetime(txt_agot).normalize()
+               except Exception:
+                   agot = None
+        rango = str(r["Rango_cubierto_completo"]) if "Rango_cubierto_completo" in r else ""
+        cov_info[p] = {"dias_txt": dias_txt, "agot": agot, "rango": rango}
     # (Opcional) Guardamos cosas útiles (NO guardamos la predicción)
     st.session_state["fechas_pedido_sugeridas"] = fechas_pedido
     st.session_state["buffer_tanque_pas2"] = buffer_tanque
@@ -613,39 +626,49 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     # 5) KPIs por producto (independientes del slicer)
     c1, c2, c3 = st.columns(3)
     for i, prod in enumerate(["ACPM", "CORRIENTE", "SUPREME"]):
-        su = su_por_prod.get(prod, 0.0)
-        fila = df_cov[df_cov["Producto"]==prod]
-        cov_txt = fila["Cobertura_dias"].iloc[0] if not fila.empty else "—"
-        if i==0: col=c1
-        elif i==1: col=c2
-        else: col=c3
+        su = float(su_por_prod.get(prod, 0.0))
+        col = [c1, c2, c3][i]
+
         with col:
-            kpi_chip(f"{prod} — Stock útil", f"{su:,.0f} gal", f"Colchón por tanque: {buffer_tanque:.0f} gal")
-            kpi_chip(f"{prod} — Cobertura", f"{cov_txt} (incluye hoy)")
-            fecha_agot = fechas_pedido.get(prod, None)
-            if fecha_agot:
-                fecha_sugerida = (pd.to_datetime(fecha_agot) - pd.Timedelta(days=1)).date()
-                if fecha_sugerida < pd.to_datetime("today").normalize().date():
-                    fecha_sugerida = pd.to_datetime("today").normalize().date()
-                sugerencia_txt = str(fecha_sugerida)
+            # --- Stock útil ---
+            kpi_chip(
+                f"{prod} — Stock útil",
+                f"{su:,.0f} gal",
+                f"Colchón por tanque: {buffer_tanque:.0f} gal"
+            )
+
+            # --- Cobertura: desde la tabla (incluye hoy) ---
+            cov_txt = cov_info.get(prod, {}).get("dias_txt", "—")
+            if cov_txt not in (None, "—"):
+                cov_txt = f"{cov_txt} (incluye hoy)"
+            kpi_chip(f"{prod} — Cobertura", cov_txt)
+
+            # --- Fecha sugerida (lead time = 1 día): pedido = agot − 1 día (nunca en pasado) ---
+            _hoy = pd.to_datetime("today").normalize()
+            agot = cov_info.get(prod, {}).get("agot", None)
+            if agot is not None:
+                fecha_pedido = (agot - pd.Timedelta(days=1)).normalize()
+                if fecha_pedido < _hoy:
+                    fecha_pedido = _hoy
+                sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
             else:
                 sugerencia_txt = "Sin urgencia"
 
             kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
 
-
-
-    
-                # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
+    # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
     hdr_pedido = st.empty()  # placeholder del encabezado dinámico
-    
 
-    # 1) Horizonte objetivo automático: primer producto que se agota (desde 'fechas_pedido')
-    hoy_d = pd.to_datetime("today").normalize().date()
-    dias_obj = max(1, min([
-        (pd.to_datetime(v).normalize().date() - hoy_d).days
-        for v in (fechas_pedido or {}).values() if v
-    ] or [2]))  # si nadie se agota, usamos 2 días conservador
+    # 1) Horizonte objetivo automático: primer producto que se agota (desde la TABLA 'cov_info')
+    hoy_ts = pd.to_datetime("today").normalize()
+    hoy_d = hoy_ts.date()
+    agot_list = [v["agot"] for v in cov_info.values() if v.get("agot") is not None]
+
+    # Si hay agotamientos, usa el mínimo (más cercano); si no, conservador 2 días
+    if agot_list:
+        dias_obj = max(1, min((ag.date() - hoy_d).days for ag in agot_list))
+    else:
+        dias_obj = 2  # si nadie se agota en el horizonte, usa 2 días conservador
 
     # 2) Déficits por tanque y requerimiento por producto usando la PREDICCIÓN LOCAL
     req_por_prod, df_def = deficits_hasta_objetivo(
@@ -655,7 +678,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         buffer_tanque=buffer_tanque,
         dias_objetivo=dias_obj,
         lead_time=1,
-        reserva_operativa_gal=100.0
+        reserva_operativa_gal=100.0,
     )
 
     # 3) Plan para los carrotanques
@@ -701,28 +724,20 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     if mejor:
         st.success(f"✅ Sugerencia: usar **{mejor}** (mayor aprovechamiento).")
 
-    # === Fecha exacta de pedido y llegada (lead time = 1 día) ===
+    # === Encabezado de pedido recomendado (lead time = 1 día) — usando la MISMA fuente (cov_info) ===
     lead_time_dias = 1
-    hoy_ts = pd.to_datetime("today").normalize()
-
-    # 🔹 Calcula fecha_arribo como el primer agotamiento entre productos (si existe)
-    _fechas_validas = [pd.to_datetime(v).normalize() for v in (fechas_pedido or {}).values() if v]
-    fecha_arribo = min(_fechas_validas) if _fechas_validas else None
+    fecha_arribo = min(agot_list) if agot_list else None
 
     if fecha_arribo is not None:
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
-        # Evita sugerir fecha pasada
+        # Nunca sugerir en pasado
         if fecha_pedido < hoy_ts:
             fecha_pedido = hoy_ts
             fecha_arribo = (hoy_ts + pd.Timedelta(days=lead_time_dias)).normalize()
 
-        # Formateo inline (evitamos helpers locales que choquen nombres)
-        fecha_pedido_str = fecha_pedido.strftime("%Y-%m-%d")
-        fecha_arribo_str = fecha_arribo.strftime("%Y-%m-%d")
-
-        # ✅ Actualiza el encabezado de ARRIBA con la fecha sugerida
         hdr_pedido.markdown(
-            f"### 🚚 Pedido recomendado — **Pide el {fecha_pedido_str}** (llegada {fecha_arribo_str})"
+            f"### 🚚 Pedido recomendado — **Pide el {fecha_pedido.strftime('%Y-%m-%d')}** "
+            f"(llegada {fecha_arribo.strftime('%Y-%m-%d')})"
         )
 
         # Guarda en sesión si otras partes lo necesitan
@@ -730,7 +745,6 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         st.session_state["pedido_fecha_llegar"] = fecha_arribo.date()
         st.session_state["pedido_lead_time"] = lead_time_dias
     else:
-        # ✅ Si no hay urgencia, también actualiza el encabezado de arriba
         hdr_pedido.markdown("### 🚚 Pedido recomendado — *(no es necesario pedir aún)*")
 
     # 5) Guardar en session_state para la explicación breve
@@ -739,8 +753,8 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     st.session_state["planes_pedido"] = {pl: df for pl, (df, cs) in planes.items()}
     st.session_state["caps_pedido"] = {pl: cs for pl, (df, cs) in planes.items()}
     with st.expander("📋 Explicación breve del pedido"):
-        hoy_txt = pd.Timestamp.today().normalize().date()
-        desde = (pd.Timestamp.today().normalize() + pd.Timedelta(days=1)).date()
+        hoy_txt = hoy_ts.date()
+        desde = (hoy_ts + pd.Timedelta(days=1)).date()
         st.write(f"Hoy **{hoy_txt}** · lead time **1 día** → cubrimos **{dias_obj}** día(s) desde **{desde}**.")
         if df_def is not None and not df_def.empty:
             df_exp = df_def.sort_values(["Producto", "Deficit", "StockUtilProy"], ascending=[True, False, True])
@@ -754,6 +768,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
                     st.write(f"🟢 {tanque} ({prod}): SU {su0:,.0f} → {su_proj:,.0f} (sin déficit).")
 
     st.divider()
+
 
 
 
