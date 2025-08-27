@@ -678,7 +678,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         buffer_tanque=buffer_tanque,
         dias_objetivo=dias_obj,
         lead_time=1,
-        reserva_operativa_gal=100.0,
+        reserva_operativa_gal=0,
     )
 
     # 3) Plan para los carrotanques
