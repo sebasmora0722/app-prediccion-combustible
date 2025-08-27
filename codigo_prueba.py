@@ -636,7 +636,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
 
     
-            # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
+                # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
     hdr_pedido = st.empty()  # placeholder del encabezado dinámico
     st.caption("Horizonte objetivo automático: 1 día(s) (primer agotamiento detectado).")
 
@@ -703,17 +703,20 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
     # === Fecha exacta de pedido y llegada (lead time = 1 día) ===
     lead_time_dias = 1
-    hoy = pd.to_datetime("today").normalize()
+    hoy_ts = pd.to_datetime("today").normalize()
 
-    # ⚠️ Aquí asumo que 'fecha_arribo' YA fue calculada unas líneas antes (tu lógica existente).
+    # 🔹 Calcula fecha_arribo como el primer agotamiento entre productos (si existe)
+    _fechas_validas = [pd.to_datetime(v).normalize() for v in (fechas_pedido or {}).values() if v]
+    fecha_arribo = min(_fechas_validas) if _fechas_validas else None
+
     if fecha_arribo is not None:
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
         # Evita sugerir fecha pasada
-        if fecha_pedido < hoy:
-            fecha_pedido = hoy
-            fecha_arribo = (hoy + pd.Timedelta(days=lead_time_dias)).normalize()
+        if fecha_pedido < hoy_ts:
+            fecha_pedido = hoy_ts
+            fecha_arribo = (hoy_ts + pd.Timedelta(days=lead_time_dias)).normalize()
 
-        # Formateo inline (sin helper local para evitar choques de nombre)
+        # Formateo inline (evitamos helpers locales que choquen nombres)
         fecha_pedido_str = fecha_pedido.strftime("%Y-%m-%d")
         fecha_arribo_str = fecha_arribo.strftime("%Y-%m-%d")
 
@@ -751,6 +754,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
                     st.write(f"🟢 {tanque} ({prod}): SU {su0:,.0f} → {su_proj:,.0f} (sin déficit).")
 
     st.divider()
+
 
 
 
