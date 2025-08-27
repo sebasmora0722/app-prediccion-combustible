@@ -362,7 +362,7 @@ def deficits_hasta_objetivo(
     buffer_tanque: float,
     dias_objetivo: int = 0,
     lead_time: int = 1,
-    reserva_operativa_gal: float = 100.0,
+    reserva_operativa_gal: float = 0,
 ):
     """
     Calcula:
