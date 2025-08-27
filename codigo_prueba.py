@@ -638,7 +638,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     
                 # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
     hdr_pedido = st.empty()  # placeholder del encabezado dinámico
-    st.caption("Horizonte objetivo automático: 1 día(s) (primer agotamiento detectado).")
+    
 
     # 1) Horizonte objetivo automático: primer producto que se agota (desde 'fechas_pedido')
     hoy_d = pd.to_datetime("today").normalize().date()
