@@ -636,7 +636,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
 
     
-        # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
+            # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
     hdr_pedido = st.empty()  # placeholder del encabezado dinámico
     st.caption("Horizonte objetivo automático: 1 día(s) (primer agotamiento detectado).")
 
@@ -658,7 +658,7 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         reserva_operativa_gal=100.0
     )
 
-    # 3) Plan para los carrotanques (prioriza tanques con mayor déficit, sin repetir tanque si hay otros)
+    # 3) Plan para los carrotanques
     carrotanques = {"751": [1440, 1320, 880], "030": [1500, 1215, 740]}
 
     def uso_carro(df_plan, caps):
@@ -705,9 +705,6 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     lead_time_dias = 1
     hoy = pd.to_datetime("today").normalize()
 
-    def ffmt(ts: "pd.Timestamp | None") -> str:
-        return ts.strftime("%Y-%m-%d") if ts is not None else "—"
-
     # ⚠️ Aquí asumo que 'fecha_arribo' YA fue calculada unas líneas antes (tu lógica existente).
     if fecha_arribo is not None:
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
@@ -716,9 +713,13 @@ def resumen_estado_actual_ui(pred_dias_default=4):
             fecha_pedido = hoy
             fecha_arribo = (hoy + pd.Timedelta(days=lead_time_dias)).normalize()
 
+        # Formateo inline (sin helper local para evitar choques de nombre)
+        fecha_pedido_str = fecha_pedido.strftime("%Y-%m-%d")
+        fecha_arribo_str = fecha_arribo.strftime("%Y-%m-%d")
+
         # ✅ Actualiza el encabezado de ARRIBA con la fecha sugerida
         hdr_pedido.markdown(
-            f"### 🚚 Pedido recomendado — **Pide el {ffmt(fecha_pedido)}** (llegada {ffmt(fecha_arribo)})"
+            f"### 🚚 Pedido recomendado — **Pide el {fecha_pedido_str}** (llegada {fecha_arribo_str})"
         )
 
         # Guarda en sesión si otras partes lo necesitan
@@ -751,34 +752,6 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
     st.divider()
 
-    
-
-
-
-
-
-
-    # 5) Guardar en session_state para la explicación breve
-    st.session_state["pedido_dias_objetivo"] = dias_obj
-    st.session_state["df_def_pedido"] = df_def
-    st.session_state["planes_pedido"] = {pl: df for pl, (df, cs) in planes.items()}
-    st.session_state["caps_pedido"]   = {pl: cs for pl, (df, cs) in planes.items()}
-    with st.expander("📋 Explicación breve del pedido"):
-        hoy = pd.Timestamp.today().normalize().date()
-        desde = (pd.Timestamp.today().normalize() + pd.Timedelta(days=1)).date()
-        st.write(f"Hoy **{hoy}** · lead time **1 día** → cubrimos **{dias_obj}** día(s) desde **{desde}**.")
-        if df_def is not None and not df_def.empty:
-            df_exp = df_def.sort_values(["Producto","Deficit","StockUtilProy"], ascending=[True, False, True])
-            for _, r in df_exp.iterrows():
-                tanque, prod = str(r["Tanque"]), str(r["Producto"])
-                su0, cons = float(r["StockUtilInicial"]), float(r["ConsumoAcum"])
-                su_proj, deficit = float(r["StockUtilProy"]), float(r["Deficit"])
-                if deficit > 0:
-                    st.write(f"🔴 {tanque} ({prod}): SU {su0:,.0f} → {su_proj:,.0f} (consumo {cons:,.0f}) · **déficit {deficit:,.0f}**.")
-                else:
-                    st.write(f"🟢 {tanque} ({prod}): SU {su0:,.0f} → {su_proj:,.0f} (sin déficit).")
-
-    st.divider()
 
 
 
