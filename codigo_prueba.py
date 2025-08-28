@@ -629,34 +629,35 @@ def resumen_estado_actual_ui(pred_dias_default=4):
         su = float(su_por_prod.get(prod, 0.0))
         col = [c1, c2, c3][i]
 
-    with col:
-        # --- Stock útil ---
-        kpi_chip(
-            f"{prod} — Stock útil",
-            f"{su:,.0f} gal",
-            f"Colchón por tanque: {buffer_tanque:.0f} gal"
-        )
+        with col:
+            # --- Stock útil ---
+            kpi_chip(
+                f"{prod} — Stock útil",
+                f"{su:,.0f} gal",
+                f"Colchón por tanque: {buffer_tanque:.0f} gal"
+            )
 
-        # --- Cobertura: leer texto desde la TABLA (incluye hoy) ---
-        cov_txt = cov_info.get(prod, {}).get("dias_txt", "—")
-        if cov_txt not in (None, "—"):
-            cov_txt = f"{cov_txt} (incluye hoy)"
-        kpi_chip(f"{prod} — Cobertura", cov_txt)
+            # --- Cobertura: leer texto desde la TABLA (incluye hoy) ---
+            cov_txt = cov_info.get(prod, {}).get("dias_txt", "—")
+            if cov_txt not in (None, "—"):
+                cov_txt = f"{cov_txt} (incluye hoy)"
+            kpi_chip(f"{prod} — Cobertura", cov_txt)
 
-        # --- Fecha sugerida (lead time = 1 día) ---
-        #     pedido = max(hoy, agotamiento - 1 día), usando SIEMPRE el agotamiento de la TABLA
-        _hoy = pd.to_datetime("today").normalize()
-        agot = cov_info.get(prod, {}).get("agot", None)
+            # --- Fecha sugerida (lead time = 1 día) ---
+            #     pedido = max(hoy, agotamiento - 1 día), usando SIEMPRE el agotamiento de la TABLA
+            _hoy = pd.to_datetime("today").normalize()
+            agot = cov_info.get(prod, {}).get("agot", None)
 
-        if agot is not None:
-            fecha_pedido = (agot - pd.Timedelta(days=1)).normalize()
-            if fecha_pedido < _hoy:
-                fecha_pedido = _hoy  # nunca sugerir en pasado
-            sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
-        else:
-            sugerencia_txt = "Sin urgencia"
+            if agot is not None:
+                fecha_pedido = (agot - pd.Timedelta(days=1)).normalize()
+                if fecha_pedido < _hoy:
+                    fecha_pedido = _hoy  # nunca sugerir en pasado
+                sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
+            else:
+                sugerencia_txt = "Sin urgencia"
 
-        kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+            kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+
 
 
     # ============ 🚚 Pedido recomendado (arriba, 100% con predicción LOCAL) ============
