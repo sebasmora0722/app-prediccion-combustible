@@ -51,7 +51,7 @@ from pathlib import Path
 
 st.set_page_config(
     page_title="Predicción de Combustible - EDS ARAUCA",
-    page_icon="static/icon-192.png",   # usa tu logo como ícono
+    page_icon="static/logo-eds-arauca.jpg",   # usa tu logo como ícono
     layout="wide"
 )
 
@@ -62,7 +62,16 @@ st.markdown("""
 <meta name="theme-color" content="#FF6600">
 """, unsafe_allow_html=True)
 
-st.title("⛽ Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA")
+# Encabezado con logo + título
+col_logo, col_title = st.columns([1, 12])
+with col_logo:
+    st.image("static/logo-eds-arauca.png", width=64)  # ajusta el tamaño si quieres
+with col_title:
+    st.markdown(
+        "<h1 style='margin:0;'>Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA</h1>",
+        unsafe_allow_html=True
+    )
+
 
 
 import streamlit as st
