@@ -1145,7 +1145,7 @@ with st.expander("🧯 Cobertura exacta y fecha de pedido (lead time = 1 día)")
         # 2) Parámetros: buffer y mínimos (lead time = 1 fijo aquí)
         buffer_tanque = st.number_input(
             "Colchón por tanque (gal)",
-            min_value=0.0, value=float(st.session_state.get("buffer_tanque_pas2", 100.0)),
+            min_value=0.0, value=float(st.session_state.get("buffer_tanque_pas2", 0)),
             step=50.0
         )
 
