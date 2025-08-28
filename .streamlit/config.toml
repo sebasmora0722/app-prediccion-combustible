@@ -1,0 +1,7 @@
+[theme]
+base = "light"                 # fondo blanco
+primaryColor = "#FF6A00"       # naranja corporativo
+backgroundColor = "#FFFFFF"    # blanco
+secondaryBackgroundColor = "#FFF3E8"  # paneles suaves
+textColor = "#0E141B"          # gris oscuro legible
+font = "sans serif"
