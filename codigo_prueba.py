@@ -611,33 +611,35 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
     # 4) Stock útil por producto + Cobertura exacta (con PREDICCIÓN LOCAL)
     su_por_prod = stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque)
+
+    # incluir_hoy=True ⇒ el “N días” YA cuenta el día de hoy
     df_cov, fechas_pedido = cobertura_exacta_por_producto(
         df_pred_local, su_por_prod, incluir_hoy=True
     )
+
+    # Construir cov_info correctamente (¡todo este bloque va DENTRO del for!)
     cov_info = {}
     for _, r in df_cov.iterrows():
         p = str(r["Producto"]).strip()
         dias_txt = str(r["Cobertura_dias"]).strip()
 
-        # Parsear agotamiento
+        # Parsear la fecha de agotamiento si existe
         agot = None
         if pd.notnull(r["Fecha_agotamiento"]):
             txt_agot = str(r["Fecha_agotamiento"]).strip()
-            if "✔️" not in txt_agot:
+            if "✔️" not in txt_agot:  # evitar el texto "✔️ Cubierto en el horizonte"
                 try:
                     agot = pd.to_datetime(txt_agot).normalize()
                 except Exception:
                     agot = None
 
-    # Calcular "fin_completo" de forma robusta (agot - 1 día)
-    fin = None
-    if agot is not None:
-        fin = (agot - pd.Timedelta(days=1)).normalize()
+        # fin_completo = (agotamiento - 1 día), si hay agotamiento
+        fin = (agot - pd.Timedelta(days=1)).normalize() if agot is not None else None
 
-    rango = str(r["Rango_cubierto_completo"]) if "Rango_cubierto_completo" in r else ""
-    cov_info[p] = {"dias_txt": dias_txt, "agot": agot, "fin": fin, "rango": rango}
+        rango = str(r["Rango_cubierto_completo"]) if "Rango_cubierto_completo" in r else ""
+        cov_info[p] = {"dias_txt": dias_txt, "agot": agot, "fin": fin, "rango": rango}
 
-    # (Opcional) Guardamos cosas útiles (NO guardamos la predicción)
+    # (Opcional) Guardar cosas útiles (NO guardamos la predicción)
     st.session_state["fechas_pedido_sugeridas"] = fechas_pedido
     st.session_state["buffer_tanque_pas2"] = buffer_tanque
 
@@ -649,32 +651,33 @@ def resumen_estado_actual_ui(pred_dias_default=4):
 
         with col:
             # --- Stock útil ---
-            kpi_chip(
-                f"{prod} — Stock útil",
-                f"{su:,.0f} gal",
-                f"Colchón por tanque: {buffer_tanque:.0f} gal"
-            )
+            kpi_chip(f"{prod} — Stock útil", f"{su:,.0f} gal",
+                     f"Colchón por tanque: {buffer_tanque:.0f} gal")
 
-            # --- Cobertura: leer texto desde la TABLA (incluye hoy) ---
+            # --- Cobertura (incluye hoy) ---
             cov_txt = cov_info.get(prod, {}).get("dias_txt", "—")
             if cov_txt not in (None, "—"):
                 cov_txt = f"{cov_txt} (incluye hoy)"
             kpi_chip(f"{prod} — Cobertura", cov_txt)
 
             # --- Fecha sugerida (lead time = 1 día) ---
-            #     pedido = max(hoy, fin_completo), donde fin_completo = (agotamiento - 1 día)
+            # Usamos fin_completo (agot - 1 día) y NUNCA sugerimos en pasado
             _hoy = pd.to_datetime("today").normalize()
             fin = cov_info.get(prod, {}).get("fin", None)
+            agot = cov_info.get(prod, {}).get("agot", None)
 
             if fin is not None:
-                fecha_pedido = fin
-                if fecha_pedido < _hoy:
-                    fecha_pedido = _hoy  # nunca sugerir en pasado
+                fecha_pedido = max(_hoy, fin)
+                sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
+            elif agot is not None:
+                # fallback: por si alguna fila no trae fin
+                fecha_pedido = max(_hoy, (agot - pd.Timedelta(days=1)).normalize())
                 sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
             else:
                 sugerencia_txt = "Sin urgencia"
 
             kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+
 
 
 
