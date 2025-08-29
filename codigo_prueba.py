@@ -65,7 +65,7 @@ st.markdown("""
 # Encabezado con logo + título
 col_logo, col_title = st.columns([1, 12])
 with col_logo:
-    st.image("static/logo-eds-arauca.jpg", width=104)  # ajusta el tamaño si quieres
+    st.image("static/logo-eds-arauca.jpg", width=100)  # ajusta el tamaño si quieres
 with col_title:
     st.markdown(
         "<h1 style='margin:0;'>Sistema Inteligente de Predicción y Logística de Combustible EDS ARAUCA</h1>",
