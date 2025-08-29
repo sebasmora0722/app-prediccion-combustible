@@ -653,19 +653,28 @@ def resumen_estado_actual_ui(pred_dias_default=4):
             kpi_chip(f"{prod} — Cobertura", cov_txt)
 
             # --- Fecha sugerida (lead time = 1 día) ---
-            #     pedido = max(hoy, agotamiento - 1 día), usando SIEMPRE el agotamiento de la TABLA
+            #     pedido = max(hoy, agotamiento - 1 día), con manejo robusto de tipos
             _hoy = pd.to_datetime("today").normalize()
-            agot = cov_info.get(prod, {}).get("agot", None)
 
-            if agot is not None:
-                fecha_pedido = (agot - pd.Timedelta(days=1)).normalize()
-                if fecha_pedido < _hoy:
-                    fecha_pedido = _hoy  # nunca sugerir en pasado
-                sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
-            else:
-                sugerencia_txt = "Sin urgencia"
+            agot_raw = cov_info.get(prod, {}).get("agot", None)
+            fecha_pedido = None
+
+            if agot_raw is not None:
+                try:
+                    # convierto cualquier cosa (str, date, numpy.datetime64, Timestamp) a Timestamp normalizado
+                    agot_ts = pd.to_datetime(agot_raw).normalize()
+                    # restar 1 día SÍ o SÍ
+                    fecha_pedido = agot_ts - pd.Timedelta(days=1)
+                    # nunca sugerir en pasado
+                    if fecha_pedido < _hoy:
+                        fecha_pedido = _hoy
+                except Exception:
+                    fecha_pedido = None
+
+            sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d") if fecha_pedido is not None else "Sin urgencia"
 
             kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+
 
 
 
