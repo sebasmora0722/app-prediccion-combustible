@@ -618,16 +618,25 @@ def resumen_estado_actual_ui(pred_dias_default=4):
     for _, r in df_cov.iterrows():
         p = str(r["Producto"]).strip()
         dias_txt = str(r["Cobertura_dias"]).strip()
+
+        # Parsear agotamiento
         agot = None
         if pd.notnull(r["Fecha_agotamiento"]):
-           txt_agot = str(r["Fecha_agotamiento"]).strip()
-           if "✔️" not in txt_agot:  # evitar el caso "✔️ Cubierto en el horizonte"
-               try:
-                   agot = pd.to_datetime(txt_agot).normalize()
-               except Exception:
-                   agot = None
-        rango = str(r["Rango_cubierto_completo"]) if "Rango_cubierto_completo" in r else ""
-        cov_info[p] = {"dias_txt": dias_txt, "agot": agot, "rango": rango}
+            txt_agot = str(r["Fecha_agotamiento"]).strip()
+            if "✔️" not in txt_agot:
+                try:
+                    agot = pd.to_datetime(txt_agot).normalize()
+                except Exception:
+                    agot = None
+
+    # Calcular "fin_completo" de forma robusta (agot - 1 día)
+    fin = None
+    if agot is not None:
+        fin = (agot - pd.Timedelta(days=1)).normalize()
+
+    rango = str(r["Rango_cubierto_completo"]) if "Rango_cubierto_completo" in r else ""
+    cov_info[p] = {"dias_txt": dias_txt, "agot": agot, "fin": fin, "rango": rango}
+
     # (Opcional) Guardamos cosas útiles (NO guardamos la predicción)
     st.session_state["fechas_pedido_sugeridas"] = fechas_pedido
     st.session_state["buffer_tanque_pas2"] = buffer_tanque
@@ -653,27 +662,20 @@ def resumen_estado_actual_ui(pred_dias_default=4):
             kpi_chip(f"{prod} — Cobertura", cov_txt)
 
             # --- Fecha sugerida (lead time = 1 día) ---
-            #     pedido = max(hoy, agotamiento - 1 día), con manejo robusto de tipos
+            #     pedido = max(hoy, fin_completo), donde fin_completo = (agotamiento - 1 día)
             _hoy = pd.to_datetime("today").normalize()
+            fin = cov_info.get(prod, {}).get("fin", None)
 
-            agot_raw = cov_info.get(prod, {}).get("agot", None)
-            fecha_pedido = None
-
-            if agot_raw is not None:
-                try:
-                    # convierto cualquier cosa (str, date, numpy.datetime64, Timestamp) a Timestamp normalizado
-                    agot_ts = pd.to_datetime(agot_raw).normalize()
-                    # restar 1 día SÍ o SÍ
-                    fecha_pedido = agot_ts - pd.Timedelta(days=1)
-                    # nunca sugerir en pasado
-                    if fecha_pedido < _hoy:
-                        fecha_pedido = _hoy
-                except Exception:
-                    fecha_pedido = None
-
-            sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d") if fecha_pedido is not None else "Sin urgencia"
+            if fin is not None:
+                fecha_pedido = fin
+                if fecha_pedido < _hoy:
+                    fecha_pedido = _hoy  # nunca sugerir en pasado
+                sugerencia_txt = fecha_pedido.strftime("%Y-%m-%d")
+            else:
+                sugerencia_txt = "Sin urgencia"
 
             kpi_chip(f"{prod} — Fecha sugerida (lead time = 1 día)", sugerencia_txt)
+
 
 
 
