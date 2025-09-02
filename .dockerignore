@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.git
+.gitignore
+.idea
+.vscode
+# ⚠️ Deja fuera grandes no necesarios.
+# OJO: NO ignores data/ ni modelos/ porque los necesitamos dentro de la imagen
