@@ -820,7 +820,7 @@ if reales_base.empty:
 else:
     
     fin_bt = pd.to_datetime(reales_base["Fecha"]).max().normalize()
-    ini_bt = fin_bt - pd.Timedelta(days=13)  # incluye fin_bt
+    ini_bt = fin_bt - pd.Timedelta(days=7)  # incluye fin_bt
     reales_14 = reales_base[(reales_base["Fecha"] >= ini_bt) & (reales_base["Fecha"] <= fin_bt)].copy()
 
     
@@ -912,8 +912,8 @@ else:
 
 with st.expander("📁 Ver datos reales cargados (turnos y tanques)"):
     st.sidebar.header("🔍 Filtros de visualización")
-    fecha_default_inicio = pd.to_datetime("2025-08-01")
-    fecha_default_fin    = pd.to_datetime("2025-08-31")
+    fecha_default_inicio = pd.to_datetime("2025-10-01")
+    fecha_default_fin    = pd.to_datetime("2025-10-31")
     fecha_inicio = st.sidebar.date_input("Fecha desde", fecha_default_inicio)
     fecha_fin    = st.sidebar.date_input("Fecha hasta", fecha_default_fin)
 
