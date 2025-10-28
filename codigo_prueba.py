@@ -1206,6 +1206,171 @@ with st.expander("🧯 Cobertura exacta y fecha de pedido (lead time = 1 día)")
             st.session_state["buffer_tanque_pas2"] = buffer_tanque
             
 
+def generar_reporte_diario_para_whatsapp(
+    hora_corte_minutos: int = 0,
+    horizonte_pred_dias: int = 14,
+    lead_time_dias: int = 1,
+) -> dict:
+    """
+    Genera el resumen diario (dict) listo para enviar por WhatsApp.
+    Usa la lógica YA existente en el archivo:
+    - generar_pred_por_tanques
+    - stock_util_por_producto
+    - cobertura_exacta_por_producto
+    - deficits_hasta_objetivo
+    - plan_carrotanque_3_comp
+
+    Retorna un dict con claves:
+      nombre_destinatario, decision, productos, carrotanque, descarga, riesgo, proximo_pedido
+    """
+    import pandas as pd
+    import os
+
+    # 1) Predicción local desde HOY por 'horizonte_pred_dias'
+    hoy = pd.to_datetime("today").normalize()
+    try:
+        df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy, horizonte_pred_dias)
+    except Exception as e:
+        return {
+            "nombre_destinatario": "Jefe",
+            "decision": "No disponible",
+            "productos": "—",
+            "carrotanque": "—",
+            "descarga": "—",
+            "riesgo": f"No fue posible generar la predicción: {e}",
+            "proximo_pedido": "—",
+        }
+
+    if df_pred_local is None or df_pred_local.empty:
+        return {
+            "nombre_destinatario": "Jefe",
+            "decision": "No disponible",
+            "productos": "—",
+            "carrotanque": "—",
+            "descarga": "—",
+            "riesgo": "Predicción local vacía.",
+            "proximo_pedido": "—",
+        }
+
+    # 2) Parámetros mínimos por tanque y buffer
+    try:
+        df_param = pd.read_excel("Capacidades tanques.xlsx", sheet_name="parametros_tanques")
+        minimos_por_tanque = dict(zip(df_param["Tanque"].astype(str), df_param["Mínimo permitido"].astype(float)))
+    except Exception:
+        minimos_por_tanque = {}
+    buffer_tanque = float(st.session_state.get("buffer_tanque_pas2", 0))
+
+    # 3) Inventario actual
+    if not os.path.exists("inventario_actual.csv"):
+        # Intentar crearlo (según tu helper)
+        _ = cargar_inventario_actual()
+    df_inv_actual = pd.read_csv("inventario_actual.csv", parse_dates=["Fecha"])
+
+    # 4) Stock útil por PRODUCTO (bandeo)
+    su_por_prod = stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque)
+
+    # 5) Cobertura exacta con predicción local (incluye hoy)
+    df_cov, fechas_pedido = cobertura_exacta_por_producto(
+        df_pred_local, su_por_prod, incluir_hoy=True
+    )
+
+    # Convertir a estructura útil para decidir
+    agot_list = []
+    for _, r in df_cov.iterrows():
+        txt_agot = str(r.get("Fecha_agotamiento", "")).strip()
+        if "✔️" not in txt_agot and txt_agot:
+            try:
+                agot_list.append(pd.to_datetime(txt_agot).normalize())
+            except Exception:
+                pass
+
+    # Horizonte objetivo automático: primer agotamiento; si no hay, 2 días conservador
+    if agot_list:
+        dias_obj = max(1, min((ag.date() - hoy.date()).days for ag in agot_list))
+    else:
+        dias_obj = 2
+
+    # 6) Déficits por tanque + requerimiento por producto a la fecha objetivo
+    req_por_prod, df_def = deficits_hasta_objetivo(
+        df_pred_tanques=df_pred_local,
+        df_inv_actual=df_inv_actual,
+        minimos_por_tanque=minimos_por_tanque,
+        buffer_tanque=buffer_tanque,
+        dias_objetivo=dias_obj,
+        lead_time=lead_time_dias,
+        reserva_operativa_gal=0,
+    )
+
+    # 7) Plan de carrotanque (elige el de mayor aprovechamiento)
+    carrotanques = {"751": [1440, 1320, 880], "030": [1500, 1215, 740]}
+    def uso_carro(df_plan, caps):
+        if df_plan is None or df_plan.empty:
+            return 0.0
+        return float(df_plan["Galones asignados"].sum()) / float(sum(caps)) * 100.0
+
+    mejor_placa, mejor_plan, mejor_caps, mejor_pct = None, None, None, -1.0
+    for placa, caps in carrotanques.items():
+        df_plan = plan_carrotanque_3_comp(
+            req_por_prod=req_por_prod,
+            df_deficits=df_def,
+            carrotanques_caps={placa: caps}
+        )
+        pct = uso_carro(df_plan, caps)
+        if pct > mejor_pct:
+            mejor_placa, mejor_plan, mejor_caps, mejor_pct = placa, df_plan, caps, pct
+
+    # 8) Formatear texto por producto y descarga
+    def fmt_num(x): 
+        try: return f"{float(x):,.0f}".replace(",", ".")
+        except: return str(x)
+
+    productos_txt = " | ".join([
+        f"ACPM: {fmt_num(req_por_prod.get('ACPM', 0))}",
+        f"Corriente: {fmt_num(req_por_prod.get('CORRIENTE', 0))}",
+        f"Supreme: {fmt_num(req_por_prod.get('SUPREME', 0))}",
+    ])
+
+    descarga_txt = "N/A"
+    if mejor_plan is not None and not mejor_plan.empty:
+        filas = []
+        for _, r in mejor_plan.iterrows():
+            prod = str(r["Producto"]) if pd.notnull(r["Producto"]) else "-"
+            tq   = str(r["Tanque"]) if pd.notnull(r["Tanque"]) else "-"
+            gal  = fmt_num(r["Galones asignados"])
+            comp = str(r["Compartimiento"])
+            filas.append(f"{prod}→{tq}({gal}) [{comp}]")
+        descarga_txt = "; ".join(filas) if filas else "N/A"
+
+    # 9) Decisión y fechas (pide el día anterior al agotamiento)
+    if agot_list:
+        fecha_arribo = min(agot_list)
+        fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
+        if fecha_pedido < hoy:
+            fecha_pedido = hoy
+            fecha_arribo = (hoy + pd.Timedelta(days=lead_time_dias)).normalize()
+        decision_txt = "Pedir HOY" if fecha_pedido.date() <= hoy.date() else f"Pedir el {fecha_pedido.date()}"
+        proximo_txt  = f"{fecha_pedido.date()} (llega {fecha_arribo.date()})"
+        riesgo_txt   = f"Tanque crítico se agota el {fecha_arribo.date()} (lead {lead_time_dias} día)."
+    else:
+        decision_txt = "No pedir hoy"
+        proximo_txt  = "Revisar en 1–2 días (sin agotamiento en el horizonte)."
+        riesgo_txt   = "Todos los productos cubiertos en el horizonte."
+
+    carrotanque_txt = "N/A"
+    if mejor_placa:
+        carrotanque_txt = f"{mejor_placa} — {sum(mejor_caps)} gal (aprovechamiento {mejor_pct:.1f}%)"
+
+    return {
+        "nombre_destinatario": "Jefe",
+        "decision": decision_txt,
+        "productos": productos_txt,
+        "carrotanque": carrotanque_txt,
+        "descarga": descarga_txt,
+        "riesgo": riesgo_txt,
+        "proximo_pedido": proximo_txt,
+    }
+
+
 
 
 
