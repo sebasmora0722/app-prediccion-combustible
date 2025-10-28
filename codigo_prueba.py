@@ -1206,6 +1206,50 @@ with st.expander("🧯 Cobertura exacta y fecha de pedido (lead time = 1 día)")
             st.session_state["buffer_tanque_pas2"] = buffer_tanque
             
 
+
+
+
+# --- Helper: formatear el mensaje estilo WhatsApp ---
+def _formatear_mensaje_whatsapp(rep: dict) -> str:
+    # Fecha/hora local (America/Bogota) sin dependencias extra
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        ahora = datetime.now(ZoneInfo("America/Bogota"))
+    except Exception:
+        # Fallback si no existe zoneinfo (entornos antiguos): hora local del sistema
+        ahora = datetime.now()
+
+    fecha = ahora.strftime("%Y-%m-%d")
+    hora  = ahora.strftime("%H:%M")
+
+    # Campos seguros
+    nd  = rep.get("nombre_destinatario", "Jefe")
+    dec = rep.get("decision", "No disponible")
+    pro = rep.get("productos", "—")
+    car = rep.get("carrotanque", "—")
+    des = rep.get("descarga", "—")
+    rie = rep.get("riesgo", "—")
+    prox= rep.get("proximo_pedido", "—")
+
+    # Mensaje compacto, apto para plantilla o envío directo (cuando conectemos la API)
+    msg = (
+        f"Hola {nd} 👋\n"
+        f"🗓️ {fecha} {hora} (America/Bogota)\n\n"
+        f"🔎 Decisión: *{dec}*\n"
+        f"⛽ Productos y cantidades (gal): {pro}\n"
+        f"🚚 Carrotanque recomendado: {car}\n"
+        f"🧭 Descarga sugerida: {des}\n"
+        f"⚠️ Riesgo / Justificación: {rie}\n"
+        f"📌 Próximo pedido: {prox}\n"
+        f"—\n"
+        f"(Enviado automáticamente por Predicción EDS Arauca)"
+    )
+    return msg
+
+
+
+
 def generar_reporte_diario_para_whatsapp(
     hora_corte_minutos: int = 0,
     horizonte_pred_dias: int = 14,
@@ -1379,6 +1423,45 @@ if __name__ == "__main__":
         print("Error generando el reporte diario:", e)
 
 
+import streamlit as st
+
+st.markdown("---")
+st.subheader("🔔 Reporte diario (vista previa WhatsApp)")
+
+colA, colB = st.columns([1,1])
+
+with colA:
+    if st.button("Generar vista previa"):
+        try:
+            rep = generar_reporte_diario_para_whatsapp()
+            st.success("Reporte generado.")
+            # Vista técnica para validar contenido
+            with st.expander("Ver JSON del reporte"):
+                st.json(rep, expanded=False)
+
+            # Mensaje formateado tipo WhatsApp
+            msg = _formatear_mensaje_whatsapp(rep)
+            st.markdown("**Mensaje (copia/pega / base de plantilla):**")
+            st.code(msg, language="")
+
+            # Resumen rápido con métricas
+            st.markdown("**Resumen:**")
+            st.metric(label="Decisión", value=rep.get("decision", "—"))
+            st.write(f"**Carrotanque:** {rep.get('carrotanque','—')}")
+            st.write(f"**Descarga:** {rep.get('descarga','—')}")
+            st.info(f"Riesgo: {rep.get('riesgo','—')}")
+            st.caption(f"Próximo pedido: {rep.get('proximo_pedido','—')}")
+
+        except Exception as e:
+            st.error(f"No se pudo generar el reporte: {e}")
+
+with colB:
+    st.write("**¿Cómo se usa esto?**")
+    st.markdown(
+        "- Este panel genera el resumen que enviaremos por WhatsApp cada mañana.\n"
+        "- Verifica que la **decisión**, las **cantidades**, el **carrotanque** y la **descarga** estén correctos.\n"
+        "- Si todo se ve bien, en el siguiente paso conectamos esto con **WhatsApp Cloud API** y lo programamos diario."
+    )
 
 
 
