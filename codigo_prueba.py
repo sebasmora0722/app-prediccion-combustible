@@ -1209,35 +1209,35 @@ with st.expander("🧯 Cobertura exacta y fecha de pedido (lead time = 1 día)")
 
 
 
-# --- Helper: formatear el mensaje estilo WhatsApp ---
 def _formatear_mensaje_whatsapp(rep: dict) -> str:
-    # Fecha/hora local (America/Bogota) sin dependencias extra
     from datetime import datetime
     try:
         from zoneinfo import ZoneInfo
         ahora = datetime.now(ZoneInfo("America/Bogota"))
     except Exception:
-        # Fallback si no existe zoneinfo (entornos antiguos): hora local del sistema
         ahora = datetime.now()
 
     fecha = ahora.strftime("%Y-%m-%d")
     hora  = ahora.strftime("%H:%M")
 
-    # Campos seguros
-    nd  = rep.get("nombre_destinatario", "Jefe")
-    dec = rep.get("decision", "No disponible")
-    pro = rep.get("productos", "—")
-    car = rep.get("carrotanque", "—")
-    des = rep.get("descarga", "—")
-    rie = rep.get("riesgo", "—")
-    prox= rep.get("proximo_pedido", "—")
+    nd   = rep.get("nombre_destinatario", "Jefe")
+    dec  = rep.get("decision", "No disponible")
+    pro  = rep.get("productos", "—")
+    car  = rep.get("carrotanque", "—")
+    des  = rep.get("descarga", "—")
+    rie  = rep.get("riesgo", "—")
+    prox = rep.get("proximo_pedido", "—")
 
-    # Mensaje compacto, apto para plantilla o envío directo (cuando conectemos la API)
+    # Detalle por producto (cobertura + fecha sugerida)
+    detalle = rep.get("productos_detalle", [])
+    detalle_txt = "\n".join([f"• {linea}" for linea in detalle]) if detalle else "• —"
+
     msg = (
         f"Hola {nd} 👋\n"
         f"🗓️ {fecha} {hora} (America/Bogota)\n\n"
         f"🔎 Decisión: *{dec}*\n"
-        f"⛽ Productos y cantidades (gal): {pro}\n"
+        f"⛽ Requerimiento por producto: {pro}\n"
+        f"{detalle_txt}\n\n"
         f"🚚 Carrotanque recomendado: {car}\n"
         f"🧭 Descarga sugerida: {des}\n"
         f"⚠️ Riesgo / Justificación: {rie}\n"
@@ -1256,35 +1256,22 @@ def generar_reporte_diario_para_whatsapp(
     lead_time_dias: int = 1,
 ) -> dict:
     """
-    Genera el resumen diario (dict) listo para enviar por WhatsApp.
-    Usa la lógica YA existente en el archivo:
-    - generar_pred_por_tanques
-    - stock_util_por_producto
-    - cobertura_exacta_por_producto
-    - deficits_hasta_objetivo
-    - plan_carrotanque_3_comp
+    Genera el resumen diario usando EXACTAMENTE la misma lógica/outputs de la app:
+    - Requerimiento por producto (dict con ACPM, CORRIENTE, SUPREME)
+    - Cobertura y Fecha sugerida por producto (de df_cov de cobertura_exacta_por_producto)
+    - Plan propuesto (plan_carrotanque_3_comp) con placa, aprovechamiento y descarga por tanque
 
-    Retorna un dict con claves:
-      nombre_destinatario, decision, productos, carrotanque, descarga, riesgo, proximo_pedido
+    Retorna claves:
+      nombre_destinatario, decision, productos, carrotanque, descarga, riesgo, proximo_pedido,
+      productos_detalle (líneas por producto con cobertura y fecha sugerida)
     """
     import pandas as pd
     import os
 
-    # 1) Predicción local desde HOY por 'horizonte_pred_dias'
     hoy = pd.to_datetime("today").normalize()
-    try:
-        df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy, horizonte_pred_dias)
-    except Exception as e:
-        return {
-            "nombre_destinatario": "Jefe",
-            "decision": "No disponible",
-            "productos": "—",
-            "carrotanque": "—",
-            "descarga": "—",
-            "riesgo": f"No fue posible generar la predicción: {e}",
-            "proximo_pedido": "—",
-        }
 
+    # === 1) Predicción por tanques (misma que usa la UI) ===
+    df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy, horizonte_pred_dias)
     if df_pred_local is None or df_pred_local.empty:
         return {
             "nombre_destinatario": "Jefe",
@@ -1294,9 +1281,10 @@ def generar_reporte_diario_para_whatsapp(
             "descarga": "—",
             "riesgo": "Predicción local vacía.",
             "proximo_pedido": "—",
+            "productos_detalle": [],
         }
 
-    # 2) Parámetros mínimos por tanque y buffer
+    # === 2) Parámetros mínimos y buffer (igual que app) ===
     try:
         df_param = pd.read_excel("Capacidades tanques.xlsx", sheet_name="parametros_tanques")
         minimos_por_tanque = dict(zip(df_param["Tanque"].astype(str), df_param["Mínimo permitido"].astype(float)))
@@ -1304,49 +1292,82 @@ def generar_reporte_diario_para_whatsapp(
         minimos_por_tanque = {}
     buffer_tanque = float(st.session_state.get("buffer_tanque_pas2", 0))
 
-    # 3) Inventario actual
+    # === 3) Inventario actual ===
     if not os.path.exists("inventario_actual.csv"):
-        # Intentar crearlo (según tu helper)
         _ = cargar_inventario_actual()
     df_inv_actual = pd.read_csv("inventario_actual.csv", parse_dates=["Fecha"])
 
-    # 4) Stock útil por PRODUCTO (bandeo)
+    # === 4) Stock útil global por producto (bandeo) ===
     su_por_prod = stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque)
 
-    # 5) Cobertura exacta con predicción local (incluye hoy)
-    df_cov, fechas_pedido = cobertura_exacta_por_producto(
+    # === 5) Cobertura y fechas por producto (lo que ves en la tarjeta de “Stock actual”) ===
+    df_cov, _fechas_pedido = cobertura_exacta_por_producto(
         df_pred_local, su_por_prod, incluir_hoy=True
     )
+    # Esperamos columnas tipo: Producto, Cobertura, Fecha_sugerida, Fecha_agotamiento
+    # (soporte flexible de nombres)
+    cols = {c.lower(): c for c in df_cov.columns}
+    col_prod   = cols.get("producto", "Producto")
+    col_cob    = cols.get("cobertura", "Cobertura")
+    col_f_sug  = cols.get("fecha sugerida", cols.get("fecha_sugerida", "Fecha_sugerida"))
+    col_f_agot = cols.get("fecha_agotamiento", "Fecha_agotamiento")
 
-    # Convertir a estructura útil para decidir
-    agot_list = []
-    for _, r in df_cov.iterrows():
-        txt_agot = str(r.get("Fecha_agotamiento", "")).strip()
-        if "✔️" not in txt_agot and txt_agot:
-            try:
-                agot_list.append(pd.to_datetime(txt_agot).normalize())
-            except Exception:
-                pass
-
-    # Horizonte objetivo automático: primer agotamiento; si no hay, 2 días conservador
-    if agot_list:
-        dias_obj = max(1, min((ag.date() - hoy.date()).days for ag in agot_list))
-    else:
-        dias_obj = 2
-
-    # 6) Déficits por tanque + requerimiento por producto a la fecha objetivo
+    # === 6) REQUERIMIENTO POR PRODUCTO (lo mismo del panel “Requerimiento por producto”) ===
+    # Usamos tu helper para obtener ese dict:
     req_por_prod, df_def = deficits_hasta_objetivo(
         df_pred_tanques=df_pred_local,
         df_inv_actual=df_inv_actual,
         minimos_por_tanque=minimos_por_tanque,
         buffer_tanque=buffer_tanque,
-        dias_objetivo=dias_obj,
+        # objetivo conservador: usar fechas sugeridas/agotamiento detectadas abajo;
+        # si no hay, 2 días como fallback
+        dias_objetivo=2,
         lead_time=lead_time_dias,
         reserva_operativa_gal=0,
     )
 
-    # 7) Plan de carrotanque (elige el de mayor aprovechamiento)
+    # === 7) Fechas y cobertura por producto (para mostrar igual que la UI) ===
+    # Y detectar tanque/producto crítico para la decisión global
+    productos = ["ACPM", "CORRIENTE", "SUPREME"]
+    detalle_lineas = []
+    fechas_agot = []
+
+    def _get(df, row, col, default="—"):
+        try:
+            val = df.at[row, col]
+            return default if pd.isna(val) else val
+        except Exception:
+            return default
+
+    for _, r in df_cov.iterrows():
+        prod = str(r.get(col_prod, "")).upper()
+        if prod not in productos:
+            continue
+        cob_txt = str(_get(df_cov, r.name, col_cob, "—"))
+        fsug    = _get(df_cov, r.name, col_f_sug, "—")
+        fagot   = _get(df_cov, r.name, col_f_agot, "")
+
+        # Requerimiento con un decimal (como en la captura)
+        def one_dec(x):
+            try:
+                return f"{float(x):,.1f}".replace(",", "")
+            except:
+                return str(x)
+
+        req_val = one_dec(req_por_prod.get(prod, 0.0))
+        # Línea por producto (para mensaje)
+        detalle_lineas.append(f"{prod}: {req_val} gal — Cobertura: {cob_txt} — Fecha sugerida: {fsug}")
+
+        # Guardar agotamiento real si existe para decisión global
+        try:
+            if fagot and isinstance(fagot, str) and "✔" not in fagot:
+                fechas_agot.append(pd.to_datetime(fagot).normalize())
+        except Exception:
+            pass
+
+    # === 8) Plan de carrotanque (igual que UI “Plan propuesto”) ===
     carrotanques = {"751": [1440, 1320, 880], "030": [1500, 1215, 740]}
+
     def uso_carro(df_plan, caps):
         if df_plan is None or df_plan.empty:
             return 0.0
@@ -1363,42 +1384,47 @@ def generar_reporte_diario_para_whatsapp(
         if pct > mejor_pct:
             mejor_placa, mejor_plan, mejor_caps, mejor_pct = placa, df_plan, caps, pct
 
-    # 8) Formatear texto por producto y descarga
-    def fmt_num(x): 
-        try: return f"{float(x):,.0f}".replace(",", ".")
+    # Descarga sugerida (tabla → texto)
+    def fmt1(x):
+        try: return f"{float(x):,.2f}".replace(",", "")
         except: return str(x)
-
-    productos_txt = " | ".join([
-        f"ACPM: {fmt_num(req_por_prod.get('ACPM', 0))}",
-        f"Corriente: {fmt_num(req_por_prod.get('CORRIENTE', 0))}",
-        f"Supreme: {fmt_num(req_por_prod.get('SUPREME', 0))}",
-    ])
 
     descarga_txt = "N/A"
     if mejor_plan is not None and not mejor_plan.empty:
         filas = []
-        for _, r in mejor_plan.iterrows():
-            prod = str(r["Producto"]) if pd.notnull(r["Producto"]) else "-"
-            tq   = str(r["Tanque"]) if pd.notnull(r["Tanque"]) else "-"
-            gal  = fmt_num(r["Galones asignados"])
-            comp = str(r["Compartimiento"])
+        for _, rr in mejor_plan.iterrows():
+            prod = str(rr.get("Producto", "-"))
+            tq   = str(rr.get("Tanque", "-"))
+            gal  = fmt1(rr.get("Galones asignados", 0))
+            comp = str(rr.get("Compartimiento", "C?"))
             filas.append(f"{prod}→{tq}({gal}) [{comp}]")
         descarga_txt = "; ".join(filas) if filas else "N/A"
 
-    # 9) Decisión y fechas (pide el día anterior al agotamiento)
-    if agot_list:
-        fecha_arribo = min(agot_list)
+    # === 9) Decisión global (idéntica a la lógica del panel: pedir el día anterior al agotamiento) ===
+    if fechas_agot:
+        fecha_arribo = min(fechas_agot)
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
         if fecha_pedido < hoy:
             fecha_pedido = hoy
             fecha_arribo = (hoy + pd.Timedelta(days=lead_time_dias)).normalize()
         decision_txt = "Pedir HOY" if fecha_pedido.date() <= hoy.date() else f"Pedir el {fecha_pedido.date()}"
         proximo_txt  = f"{fecha_pedido.date()} (llega {fecha_arribo.date()})"
-        riesgo_txt   = f"Tanque crítico se agota el {fecha_arribo.date()} (lead {lead_time_dias} día)."
+        riesgo_txt   = f"Producto/tanque crítico se agota el {fecha_arribo.date()} (lead {lead_time_dias} día)."
     else:
         decision_txt = "No pedir hoy"
         proximo_txt  = "Revisar en 1–2 días (sin agotamiento en el horizonte)."
         riesgo_txt   = "Todos los productos cubiertos en el horizonte."
+
+    # === 10) Texto compacto de productos (solo cantidades, como tu “Requerimiento por producto”) ===
+    def one_dec(x):
+        try: return f"{float(x):,.1f}".replace(",", "")
+        except: return str(x)
+
+    productos_txt = " | ".join([
+        f"ACPM: {one_dec(req_por_prod.get('ACPM', 0))}",
+        f"Corriente: {one_dec(req_por_prod.get('CORRIENTE', 0))}",
+        f"Supreme: {one_dec(req_por_prod.get('SUPREME', 0))}",
+    ])
 
     carrotanque_txt = "N/A"
     if mejor_placa:
@@ -1412,15 +1438,10 @@ def generar_reporte_diario_para_whatsapp(
         "descarga": descarga_txt,
         "riesgo": riesgo_txt,
         "proximo_pedido": proximo_txt,
+        # nuevo: detalle por producto (para que el WhatsApp coincida con tarjetas de la app)
+        "productos_detalle": detalle_lineas,
     }
 
-if __name__ == "__main__":
-    from pprint import pprint
-    try:
-        reporte = generar_reporte_diario_para_whatsapp()
-        pprint(reporte)
-    except Exception as e:
-        print("Error generando el reporte diario:", e)
 
 
 import streamlit as st
