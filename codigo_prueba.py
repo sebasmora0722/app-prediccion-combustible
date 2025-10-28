@@ -1370,6 +1370,14 @@ def generar_reporte_diario_para_whatsapp(
         "proximo_pedido": proximo_txt,
     }
 
+if __name__ == "__main__":
+    from pprint import pprint
+    try:
+        reporte = generar_reporte_diario_para_whatsapp()
+        pprint(reporte)
+    except Exception as e:
+        print("Error generando el reporte diario:", e)
+
 
 
 
