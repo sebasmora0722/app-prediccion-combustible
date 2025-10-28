@@ -1255,12 +1255,20 @@ def generar_reporte_diario_para_whatsapp(
     horizonte_pred_dias: int = 14,
     lead_time_dias: int = 1,
 ) -> dict:
-    import pandas as pd
-    import re, os
+    import pandas as pd, re, unicodedata, os
+
+    def _norm(s: str) -> str:
+        if s is None: return ""
+        s = str(s)
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", "", s)  # quita espacios, guiones, paréntesis, etc.
+        return s
 
     hoy = pd.to_datetime("today").normalize()
 
-    # --- 1) Predicción por tanques (misma que usa la UI) ---
+    # 1) Pred por tanques (misma que la UI)
     df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy, horizonte_pred_dias)
     if df_pred_local is None or df_pred_local.empty:
         return {
@@ -1274,7 +1282,7 @@ def generar_reporte_diario_para_whatsapp(
             "productos_detalle": [],
         }
 
-    # --- 2) Parámetros mínimos y buffer (igual que app) ---
+    # 2) Parámetros y buffer
     try:
         df_param = pd.read_excel("Capacidades tanques.xlsx", sheet_name="parametros_tanques")
         minimos_por_tanque = dict(zip(df_param["Tanque"].astype(str), df_param["Mínimo permitido"].astype(float)))
@@ -1282,73 +1290,95 @@ def generar_reporte_diario_para_whatsapp(
         minimos_por_tanque = {}
     buffer_tanque = float(st.session_state.get("buffer_tanque_pas2", 0))
 
-    # --- 3) Inventario actual ---
+    # 3) Inventario actual
     if not os.path.exists("inventario_actual.csv"):
         _ = cargar_inventario_actual()
     df_inv_actual = pd.read_csv("inventario_actual.csv", parse_dates=["Fecha"])
 
-    # --- 4) Stock útil global por producto (bandeo) ---
+    # 4) Stock útil global por producto
     su_por_prod = stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque)
 
-    # --- 5) Cobertura y fechas por producto (lo que ves en la tarjeta “Stock actual”) ---
+    # 5) Cobertura y fechas (lo que ves en tarjetas superiores)
     df_cov, _ = cobertura_exacta_por_producto(df_pred_local, su_por_prod, incluir_hoy=True)
 
-    # Buscar nombres de columnas de forma flexible
-    def find_col(patterns):
-        for c in df_cov.columns:
-            cl = c.lower()
-            if any(re.search(pat, cl) for pat in patterns):
-                return c
-        return None
-
-    col_prod = find_col([r"producto"])
-    col_cob  = find_col([r"cobertura"])
-    # Ejemplos reales: "fecha sugerida (lead time = 1 día)", "fecha_sugerida"
-    col_f_sug  = find_col([r"fecha\s*_?sugerida", r"fecha.*sugerida"])
-    col_f_agot = find_col([r"fecha\s*_?agotamiento", r"fecha.*agotamiento"])
-
+    # Mapa de columnas normalizadas
+    norm_map = { _norm(c): c for c in df_cov.columns }
+    # Intentos de nombres
+    col_prod   = norm_map.get("producto", None)
     if not col_prod:
-        # sin columna de producto no podemos mapear correctamente
-        col_prod = "Producto" if "Producto" in df_cov.columns else df_cov.columns[0]
+        # toma la primera que contenga 'producto'
+        for k,v in norm_map.items():
+            if "producto" in k:
+                col_prod = v; break
+    col_cob    = None
+    for key in ["cobertura","coberturaincluyehoy"]:
+        if key in norm_map: col_cob = norm_map[key]; break
+    if not col_cob:
+        for k,v in norm_map.items():
+            if "cobertura" in k:
+                col_cob = v; break
+
+    # “fecha sugerida (lead time = 1 día)” puede venir con varias variantes
+    col_f_sug = None
+    for key in ["fechasugerida","fechasugeridaleadtime1dia","fechasugeridaleadtime1dia"]:
+        if key in norm_map: col_f_sug = norm_map[key]; break
+    if not col_f_sug:
+        for k,v in norm_map.items():
+            if "fechasugerida" in k:
+                col_f_sug = v; break
+
+    col_f_agot = None
+    for key in ["fechaagotamiento","fechaagotamientoestimada"]:
+        if key in norm_map: col_f_agot = norm_map[key]; break
+    if not col_f_agot:
+        for k,v in norm_map.items():
+            if "fechaagot" in k:
+                col_f_agot = v; break
 
     productos = ["ACPM", "CORRIENTE", "SUPREME"]
-
-    # --- 6) Requerimiento por PRODUCTO usando SU PROPIA fecha sugerida ---
-    # como deficits_hasta_objetivo acepta un único dias_objetivo, hacemos un loop por producto
     req_por_prod = {p: 0.0 for p in productos}
-    fechas_agot = []
-    detalle_lineas = []
+    detalle_lineas, fechas_agot = [], []
 
-    def parse_fecha(x):
+    def _parse_fecha(x):
         try:
-            # evita strings con "✔️"
             if isinstance(x, str) and "✔" in x:
                 return None
             return pd.to_datetime(x).normalize()
         except Exception:
             return None
 
+    def _dias_de_cobertura(cob_txt):
+        # Ej: "4 días (incluye hoy)" -> 4
+        if not isinstance(cob_txt, str): cob_txt = str(cob_txt)
+        m = re.search(r"(\d+)\s*d[ií]as", cob_txt.lower())
+        if m:
+            try:
+                return int(m.group(1))
+            except: pass
+        return None
+
+    # Recorre productos y toma su propia fecha sugerida; si falta, usa los días de Cobertura
     for p in productos:
-        fila = df_cov[df_cov[col_prod].astype(str).str.upper() == p]
-        if fila.empty:
-            # línea detalle básica
-            detalle_lineas.append(f"{p}: 0.0 gal — Cobertura: — — Fecha sugerida: —")
-            continue
+        row = df_cov[df_cov[col_prod].astype(str).str.upper() == p] if col_prod else pd.DataFrame()
+        cob_txt, f_sug_val, f_agot_val = "—", "—", None
+        if not row.empty:
+            r = row.iloc[0]
+            if col_cob:    cob_txt   = r.get(col_cob, "—")
+            if col_f_sug:  f_sug_val = r.get(col_f_sug, "—")
+            if col_f_agot: f_agot_val= r.get(col_f_agot, None)
 
-        fila = fila.iloc[0]
-        cob_txt = str(fila.get(col_cob, "—")) if col_cob else "—"
-        f_sug   = fila.get(col_f_sug, "—") if col_f_sug else "—"
-        f_agot  = fila.get(col_f_agot, None) if col_f_agot else None
-
-        # días objetivo a partir de la FECHA SUGERIDA (si existe)
+        # Determina dias_obj desde fecha sugerida o cobertura
         dias_obj = 2
-        f_sug_dt = parse_fecha(f_sug)
+        f_sug_dt = _parse_fecha(f_sug_val)
         if f_sug_dt is not None:
-            dias = (f_sug_dt.date() - hoy.date()).days
-            dias_obj = max(0, dias)  # si ya pasó, 0
+            dias_obj = max(0, (f_sug_dt.date() - hoy.date()).days)
+        else:
+            d_cov = _dias_de_cobertura(cob_txt)
+            if d_cov is not None:
+                dias_obj = max(0, d_cov - 1)  # si “incluye hoy”, pedir el día anterior
 
-        # calcular déficit SOLO para este producto
-        rp, df_def = deficits_hasta_objetivo(
+        # Calcula déficit SOLO para este producto con su dias_obj
+        rp, _df_def = deficits_hasta_objetivo(
             df_pred_tanques=df_pred_local,
             df_inv_actual=df_inv_actual,
             minimos_por_tanque=minimos_por_tanque,
@@ -1358,33 +1388,32 @@ def generar_reporte_diario_para_whatsapp(
             reserva_operativa_gal=0,
         )
         val = float(rp.get(p, 0.0))
-        req_por_prod[p] = max(0.0, val)  # no negativos
+        req_por_prod[p] = max(0.0, val)
 
-        # detalle por producto (idéntico a la tarjeta)
+        # Línea detalle (como tarjetas)
         try:
             req_txt = f"{val:,.1f}".replace(",", "")
-        except Exception:
+        except:
             req_txt = str(val)
-        detalle_lineas.append(f"{p}: {req_txt} gal — Cobertura: {cob_txt} — Fecha sugerida: {f_sug}")
+        detalle_lineas.append(f"{p}: {req_txt} gal — Cobertura: {cob_txt} — Fecha sugerida: {f_sug_val if f_sug_dt is not None else '—'}")
 
-        # guardar posible fecha de agotamiento real (para decisión global)
-        fag = parse_fecha(f_agot)
+        fag = _parse_fecha(f_agot_val)
         if fag is not None:
             fechas_agot.append(fag)
 
-    # --- 7) Plan de carrotanque (igual a “Plan propuesto” de la UI) ---
+    # 7) Plan de carrotanque
     carrotanques = {"751": [1440, 1320, 880], "030": [1500, 1215, 740]}
 
     def uso_carro(df_plan, caps):
-        if df_plan is None or df_plan.empty:
-            return 0.0
+        if df_plan is None or df_plan.empty: return 0.0
         return float(df_plan["Galones asignados"].sum()) / float(sum(caps)) * 100.0
 
+    # Para plan, basta con req_por_prod (igual que en la UI)
     mejor_placa, mejor_plan, mejor_caps, mejor_pct = None, None, None, -1.0
     for placa, caps in carrotanques.items():
         df_plan = plan_carrotanque_3_comp(
             req_por_prod=req_por_prod,
-            df_deficits=None,  # no es necesario si la función admite req_por_prod directo
+            df_deficits=None,
             carrotanques_caps={placa: caps}
         )
         pct = uso_carro(df_plan, caps)
@@ -1406,7 +1435,7 @@ def generar_reporte_diario_para_whatsapp(
             filas.append(f"{prod}→{tq}({gal}) [{comp}]")
         descarga_txt = "; ".join(filas) if filas else "N/A"
 
-    # --- 8) Decisión global (pide el día anterior al primer agotamiento) ---
+    # 8) Decisión global (día anterior al primer agotamiento)
     if fechas_agot:
         fecha_arribo = min(fechas_agot)
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
@@ -1421,7 +1450,7 @@ def generar_reporte_diario_para_whatsapp(
         proximo_txt  = "Revisar en 1–2 días (sin agotamiento en el horizonte)."
         riesgo_txt   = "Todos los productos cubiertos en el horizonte."
 
-    # --- 9) Texto compacto “Requerimiento por producto” (una línea) ---
+    # 9) Línea compacta de “Requerimiento por producto”
     def one_dec(x):
         try: return f"{float(x):,.1f}".replace(",", "")
         except: return str(x)
@@ -1446,6 +1475,7 @@ def generar_reporte_diario_para_whatsapp(
         "proximo_pedido": proximo_txt,
         "productos_detalle": detalle_lineas,
     }
+
 
 
 
