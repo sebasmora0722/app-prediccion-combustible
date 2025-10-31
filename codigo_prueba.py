@@ -1255,34 +1255,32 @@ def generar_reporte_diario_para_whatsapp(
     horizonte_pred_dias: int = 14,
     lead_time_dias: int = 1,
 ) -> dict:
-    import pandas as pd, re, unicodedata, os
+    """
+    Genera un reporte DIARIO listo para WhatsApp, con:
+      - stock útil por producto,
+      - cobertura y fecha de agotamiento,
+      - requerimiento por producto,
+      - planes de descarga por compartimiento para AMBOS carrotanques (751 y 030),
+      - decisión (pedir o no) y fechas (pedido/llegada).
 
-    def _norm(s: str) -> str:
-        if s is None: return ""
-        s = str(s)
-        s = unicodedata.normalize("NFKD", s)
-        s = "".join(ch for ch in s if not unicodedata.combining(ch))
-        s = s.lower()
-        s = re.sub(r"[^a-z0-9]+", "", s)  # quita espacios, guiones, paréntesis, etc.
-        return s
+    Devuelve un dict con claves:
+      decision, stock_actual{dict}, cobertura{dict->(dias_txt, fecha_pedido_txt)},
+      req_por_prod{dict}, riesgos, fechas, y planes_detallados{placa: {...}}
+    """
+    import pandas as pd, os
 
-    hoy = pd.to_datetime("today").normalize()
+    hoy_ts = pd.to_datetime("today").normalize()
+    hoy_d  = hoy_ts.date()
 
-    # 1) Pred por tanques (misma que la UI)
-    df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy, horizonte_pred_dias)
+    # === 1) Predicción local por tanques, igual que el dashboard ===
+    df_pred_local = generar_pred_por_tanques(df_tanques, modelo_tanques, hoy_ts, horizonte_pred_dias)
     if df_pred_local is None or df_pred_local.empty:
         return {
-            "nombre_destinatario": "Jefe",
             "decision": "No disponible",
-            "productos": "—",
-            "carrotanque": "—",
-            "descarga": "—",
-            "riesgo": "Predicción local vacía.",
-            "proximo_pedido": "—",
-            "productos_detalle": [],
+            "motivo": "Predicción local vacía.",
         }
 
-    # 2) Parámetros y buffer
+    # === 2) Leer mínimos y buffer (mismo origen que la UI) ===
     try:
         df_param = pd.read_excel("Capacidades tanques.xlsx", sheet_name="parametros_tanques")
         minimos_por_tanque = dict(zip(df_param["Tanque"].astype(str), df_param["Mínimo permitido"].astype(float)))
@@ -1290,192 +1288,211 @@ def generar_reporte_diario_para_whatsapp(
         minimos_por_tanque = {}
     buffer_tanque = float(st.session_state.get("buffer_tanque_pas2", 0))
 
-    # 3) Inventario actual
+    # === 3) Inventario actual ===
     if not os.path.exists("inventario_actual.csv"):
         _ = cargar_inventario_actual()
     df_inv_actual = pd.read_csv("inventario_actual.csv", parse_dates=["Fecha"])
 
-    # 4) Stock útil global por producto
+    # Stock útil por producto (lo mismo que usas en las tarjetas)
     su_por_prod = stock_util_por_producto(df_inv_actual, minimos_por_tanque, buffer_tanque)
 
-    # 5) Cobertura y fechas (lo que ves en tarjetas superiores)
-    df_cov, _ = cobertura_exacta_por_producto(df_pred_local, su_por_prod, incluir_hoy=True)
+    # === 4) Cobertura exacta + fechas de agotamiento (incluye hoy) ===
+    df_cov, fechas_pedido = cobertura_exacta_por_producto(df_pred_local, su_por_prod, incluir_hoy=True)
 
-    # Mapa de columnas normalizadas
-    norm_map = { _norm(c): c for c in df_cov.columns }
-    # Intentos de nombres
-    col_prod   = norm_map.get("producto", None)
-    if not col_prod:
-        # toma la primera que contenga 'producto'
-        for k,v in norm_map.items():
-            if "producto" in k:
-                col_prod = v; break
-    col_cob    = None
-    for key in ["cobertura","coberturaincluyehoy"]:
-        if key in norm_map: col_cob = norm_map[key]; break
-    if not col_cob:
-        for k,v in norm_map.items():
-            if "cobertura" in k:
-                col_cob = v; break
-
-    # “fecha sugerida (lead time = 1 día)” puede venir con varias variantes
-    col_f_sug = None
-    for key in ["fechasugerida","fechasugeridaleadtime1dia","fechasugeridaleadtime1dia"]:
-        if key in norm_map: col_f_sug = norm_map[key]; break
-    if not col_f_sug:
-        for k,v in norm_map.items():
-            if "fechasugerida" in k:
-                col_f_sug = v; break
-
-    col_f_agot = None
-    for key in ["fechaagotamiento","fechaagotamientoestimada"]:
-        if key in norm_map: col_f_agot = norm_map[key]; break
-    if not col_f_agot:
-        for k,v in norm_map.items():
-            if "fechaagot" in k:
-                col_f_agot = v; break
-
-    productos = ["ACPM", "CORRIENTE", "SUPREME"]
-    req_por_prod = {p: 0.0 for p in productos}
-    detalle_lineas, fechas_agot = [], []
-
-    def _parse_fecha(x):
-        try:
-            if isinstance(x, str) and "✔" in x:
-                return None
-            return pd.to_datetime(x).normalize()
-        except Exception:
-            return None
-
-    def _dias_de_cobertura(cob_txt):
-        # Ej: "4 días (incluye hoy)" -> 4
-        if not isinstance(cob_txt, str): cob_txt = str(cob_txt)
-        m = re.search(r"(\d+)\s*d[ií]as", cob_txt.lower())
-        if m:
+    # Armar cobertura legible y detectar PRIMER agotamiento
+    cov_info = {}
+    agot_list = []
+    for _, r in df_cov.iterrows():
+        prod = str(r["Producto"]).strip().upper()
+        dias_txt = str(r["Cobertura_dias"])
+        agot_txt = str(r["Fecha_agotamiento"])
+        agot = None
+        if "✔" not in agot_txt:
             try:
-                return int(m.group(1))
-            except: pass
-        return None
-
-    # Recorre productos y toma su propia fecha sugerida; si falta, usa los días de Cobertura
-    for p in productos:
-        row = df_cov[df_cov[col_prod].astype(str).str.upper() == p] if col_prod else pd.DataFrame()
-        cob_txt, f_sug_val, f_agot_val = "—", "—", None
-        if not row.empty:
-            r = row.iloc[0]
-            if col_cob:    cob_txt   = r.get(col_cob, "—")
-            if col_f_sug:  f_sug_val = r.get(col_f_sug, "—")
-            if col_f_agot: f_agot_val= r.get(col_f_agot, None)
-
-        # Determina dias_obj desde fecha sugerida o cobertura
-        dias_obj = 2
-        f_sug_dt = _parse_fecha(f_sug_val)
-        if f_sug_dt is not None:
-            dias_obj = max(0, (f_sug_dt.date() - hoy.date()).days)
+                agot = pd.to_datetime(agot_txt).normalize()
+            except Exception:
+                agot = None
+        if agot is not None:
+            agot_list.append(agot)
+            # fecha sugerida = agot - 1 día (nunca en pasado)
+            fecha_pedida = max(hoy_ts, (agot - pd.Timedelta(days=lead_time_dias)).normalize())
+            fecha_pedido_txt = fecha_pedida.strftime("%Y-%m-%d")
         else:
-            d_cov = _dias_de_cobertura(cob_txt)
-            if d_cov is not None:
-                dias_obj = max(0, d_cov - 1)  # si “incluye hoy”, pedir el día anterior
+            fecha_pedido_txt = "Sin urgencia"
+        cov_info[prod] = (f"{dias_txt} (incluye hoy)", fecha_pedido_txt)
 
-        # Calcula déficit SOLO para este producto con su dias_obj
-        rp, _df_def = deficits_hasta_objetivo(
-            df_pred_tanques=df_pred_local,
-            df_inv_actual=df_inv_actual,
-            minimos_por_tanque=minimos_por_tanque,
-            buffer_tanque=buffer_tanque,
-            dias_objetivo=dias_obj,
-            lead_time=lead_time_dias,
-            reserva_operativa_gal=0,
-        )
-        val = float(rp.get(p, 0.0))
-        req_por_prod[p] = max(0.0, val)
+    # === 5) Horizonte objetivo automático (igual que tu UI) ===
+    if agot_list:
+        dias_obj = max(1, min((ag.date() - hoy_d).days for ag in agot_list))
+    else:
+        dias_obj = 2
 
-        # Línea detalle (como tarjetas)
-        try:
-            req_txt = f"{val:,.1f}".replace(",", "")
-        except:
-            req_txt = str(val)
-        detalle_lineas.append(f"{p}: {req_txt} gal — Cobertura: {cob_txt} — Fecha sugerida: {f_sug_val if f_sug_dt is not None else '—'}")
+    # === 6) Requerimiento por producto + déficits por tanque (como en tu UI) ===
+    req_por_prod, df_def = deficits_hasta_objetivo(
+        df_pred_tanques=df_pred_local,
+        df_inv_actual=df_inv_actual,
+        minimos_por_tanque=minimos_por_tanque,
+        buffer_tanque=buffer_tanque,
+        dias_objetivo=dias_obj,
+        lead_time=lead_time_dias,
+        reserva_operativa_gal=0,
+    )
 
-        fag = _parse_fecha(f_agot_val)
-        if fag is not None:
-            fechas_agot.append(fag)
-
-    # 7) Plan de carrotanque
+    # === 7) Planes por AMBOS carrotanques, con compartimientos ===
     carrotanques = {"751": [1440, 1320, 880], "030": [1500, 1215, 740]}
 
     def uso_carro(df_plan, caps):
         if df_plan is None or df_plan.empty: return 0.0
         return float(df_plan["Galones asignados"].sum()) / float(sum(caps)) * 100.0
 
-    # Para plan, basta con req_por_prod (igual que en la UI)
-    mejor_placa, mejor_plan, mejor_caps, mejor_pct = None, None, None, -1.0
+    planes_detallados = {}
     for placa, caps in carrotanques.items():
         df_plan = plan_carrotanque_3_comp(
             req_por_prod=req_por_prod,
-            df_deficits=None,
+            df_deficits=df_def,
             carrotanques_caps={placa: caps}
         )
+        asignado = float(df_plan["Galones asignados"].sum()) if not df_plan.empty else 0.0
+        remanente = float(sum(caps)) - asignado
         pct = uso_carro(df_plan, caps)
-        if pct > mejor_pct:
-            mejor_placa, mejor_plan, mejor_caps, mejor_pct = placa, df_plan, caps, pct
 
-    def fmt1(x):
-        try: return f"{float(x):,.2f}".replace(",", "")
-        except: return str(x)
+        # Normalizar a C1/C2/C3 con capacidad entre paréntesis
+        # Nota: tu función ya deja 'Compartimiento' como "1440 gal", "1320 gal", etc.
+        c_map = {}
+        for idx, cap in enumerate(caps, start=1):
+            c_map[f"C{idx}"] = {"cap_txt": f"{cap} gal", "producto": "-", "tanque": "-", "gal": 0.0}
+        if not df_plan.empty:
+            # df_plan ordenado por compartimiento (1..3)
+            for i, row in df_plan.reset_index(drop=True).iterrows():
+                key = f"C{i+1}"
+                if key in c_map:
+                    c_map[key]["producto"] = str(row.get("Producto", "-"))
+                    c_map[key]["tanque"]   = str(row.get("Tanque", "-"))
+                    c_map[key]["gal"]      = float(row.get("Galones asignados", 0.0))
 
-    descarga_txt = "N/A"
-    if mejor_plan is not None and not mejor_plan.empty:
-        filas = []
-        for _, rr in mejor_plan.iterrows():
-            prod = str(rr.get("Producto", "-"))
-            tq   = str(rr.get("Tanque", "-"))
-            gal  = fmt1(rr.get("Galones asignados", 0))
-            comp = str(rr.get("Compartimiento", "C?"))
-            filas.append(f"{prod}→{tq}({gal}) [{comp}]")
-        descarga_txt = "; ".join(filas) if filas else "N/A"
+        planes_detallados[placa] = {
+            "caps": caps,
+            "aprovechamiento_pct": pct,
+            "remanente": remanente,
+            "c1": c_map["C1"], "c2": c_map["C2"], "c3": c_map["C3"],
+        }
 
-    # 8) Decisión global (día anterior al primer agotamiento)
-    if fechas_agot:
-        fecha_arribo = min(fechas_agot)
+    # === 8) Decisión global (día anterior al primer agotamiento) ===
+    if agot_list:
+        fecha_arribo = min(agot_list)
         fecha_pedido = (fecha_arribo - pd.Timedelta(days=lead_time_dias)).normalize()
-        if fecha_pedido < hoy:
-            fecha_pedido = hoy
-            fecha_arribo = (hoy + pd.Timedelta(days=lead_time_dias)).normalize()
-        decision_txt = "Pedir HOY" if fecha_pedido.date() <= hoy.date() else f"Pedir el {fecha_pedido.date()}"
-        proximo_txt  = f"{fecha_pedido.date()} (llega {fecha_arribo.date()})"
+        if fecha_pedido < hoy_ts:
+            fecha_pedido = hoy_ts
+            fecha_arribo = (hoy_ts + pd.Timedelta(days=lead_time_dias)).normalize()
+        decision_txt = "Pedir HOY" if fecha_pedido.date() <= hoy_d else f"Pedir el {fecha_pedido.date()}"
+        accion_txt   = f"{fecha_pedido.date()} (llega {fecha_arribo.date()})"
         riesgo_txt   = f"Producto/tanque crítico se agota el {fecha_arribo.date()} (lead {lead_time_dias} día)."
     else:
         decision_txt = "No pedir hoy"
-        proximo_txt  = "Revisar en 1–2 días (sin agotamiento en el horizonte)."
-        riesgo_txt   = "Todos los productos cubiertos en el horizonte."
+        accion_txt   = "Revisar mañana 06:30."
+        riesgo_txt   = "Sin agotamientos en el horizonte."
 
-    # 9) Línea compacta de “Requerimiento por producto”
+    # === 9) Preparar salida estructurada (para el formateador) ===
     def one_dec(x):
-        try: return f"{float(x):,.1f}".replace(",", "")
-        except: return str(x)
+        try: return float(f"{float(x):.1f}")
+        except: return 0.0
 
-    productos_txt = " | ".join([
-        f"ACPM: {one_dec(req_por_prod.get('ACPM', 0))}",
-        f"Corriente: {one_dec(req_por_prod.get('CORRIENTE', 0))}",
-        f"Supreme: {one_dec(req_por_prod.get('SUPREME', 0))}",
-    ])
-
-    carrotanque_txt = "N/A"
-    if mejor_placa:
-        carrotanque_txt = f"{mejor_placa} — {sum(mejor_caps)} gal (aprovechamiento {mejor_pct:.1f}%)"
+    stock_actual = {
+        "ACPM":     one_dec(su_por_prod.get("ACPM", 0.0)),
+        "CORRIENTE":one_dec(su_por_prod.get("CORRIENTE", 0.0)),
+        "SUPREME":  one_dec(su_por_prod.get("SUPREME", 0.0)),
+    }
+    req_redondeado = {k: one_dec(v) for k, v in (req_por_prod or {}).items()}
 
     return {
-        "nombre_destinatario": "Jefe",
         "decision": decision_txt,
-        "productos": productos_txt,
-        "carrotanque": carrotanque_txt,
-        "descarga": descarga_txt,
+        "accion": accion_txt,
         "riesgo": riesgo_txt,
-        "proximo_pedido": proximo_txt,
-        "productos_detalle": detalle_lineas,
+        "stock_actual": stock_actual,
+        "cobertura": cov_info,           # dict producto → (dias_txt_incluye_hoy, fecha_pedido_txt)
+        "req_por_prod": req_redondeado,  # dict con 1 decimal
+        "planes": planes_detallados,     # dict por placa (c1/c2/c3 con cap y asignaciones)
+        "lead": lead_time_dias,
     }
 
+
+def _fmt_gal(x): 
+    try: return f"{float(x):,.1f}".replace(",", "")
+    except: return str(x)
+
+def _armar_mensaje_no_pedir(rep: dict) -> str:
+    s = rep.get("stock_actual", {})
+    c = rep.get("cobertura", {})
+    def cov(p): 
+        t = c.get(p, ("—","Sin urgencia"))[0]
+        return t
+    return (
+        "*Predicción EDS Arauca — Resumen diario*\n"
+        "🕘 06:30 (America/Bogota)\n\n"
+        "*Decisión:* No pedir hoy\n"
+        "*Stock actual:*\n"
+        f"• ACPM: {_fmt_gal(s.get('ACPM',0))} gal\n"
+        f"• Corriente: {_fmt_gal(s.get('CORRIENTE',0))} gal\n"
+        f"• Supreme: {_fmt_gal(s.get('SUPREME',0))} gal\n\n"
+        "*Cobertura:*\n"
+        f"• ACPM: {cov('ACPM')}\n"
+        f"• Corriente: {cov('CORRIENTE')}\n"
+        f"• Supreme: {cov('SUPREME')}\n\n"
+        "*Riesgo:* sin agotamientos en el horizonte.\n"
+        "📌 *Siguiente revisión:* mañana 06:30."
+    )
+
+def _armar_mensaje_si_pedir(rep: dict) -> str:
+    s = rep.get("stock_actual", {})
+    r = rep.get("req_por_prod", {})
+    planes = rep.get("planes", {})
+    c      = rep.get("cobertura", {})
+    fecha_agot_info = rep.get("riesgo","")
+    accion = rep.get("accion","")
+    lead   = rep.get("lead",1)
+
+    def cov(p):
+        dias_txt, f_sug = c.get(p, ("—","Sin urgencia"))
+        return f"{dias_txt} — Fecha sugerida: {f_sug}"
+
+    def bloque_carro(placa: str):
+        pl = planes.get(placa, {})
+        if not pl: 
+            return f"*Opción — Carrotanque {placa}*\n(no se pudo calcular plan)\n"
+        ap = pl.get("aprovechamiento_pct", 0.0)
+        c1, c2, c3 = pl.get("c1",{}), pl.get("c2",{}), pl.get("c3",{})
+        rem = pl.get("remanente", 0.0)
+        return (
+            f"*Opción — Carrotanque {placa}*\n"
+            f"• C1 ({c1.get('cap_txt','?')}): {c1.get('producto','-')} → {c1.get('tanque','-')} — {_fmt_gal(c1.get('gal',0))} gal\n"
+            f"• C2 ({c2.get('cap_txt','?')}): {c2.get('producto','-')} → {c2.get('tanque','-')} — {_fmt_gal(c2.get('gal',0))} gal\n"
+            f"• C3 ({c3.get('cap_txt','?')}): {c3.get('producto','-')} → {c3.get('tanque','-')} — {_fmt_gal(c3.get('gal',0))} gal\n"
+            f"Remanente: {_fmt_gal(rem)} gal | *Aprovechamiento:* {ap:.1f}%\n"
+        )
+
+    return (
+        "*Predicción EDS Arauca — Recomendación diaria de pedido*\n"
+        "🕘 06:30 (America/Bogota)\n\n"
+        "📊 *Stock útil actual:*\n"
+        f"• ACPM: {_fmt_gal(s.get('ACPM',0))} gal\n"
+        f"• Corriente: {_fmt_gal(s.get('CORRIENTE',0))} gal\n"
+        f"• Supreme: {_fmt_gal(s.get('SUPREME',0))} gal\n\n"
+        "📈 *Requerimiento proyectado (gal):*\n"
+        f"• ACPM: {_fmt_gal(r.get('ACPM',0))}\n"
+        f"• Corriente: {_fmt_gal(r.get('CORRIENTE',0))}\n"
+        f"• Supreme: {_fmt_gal(r.get('SUPREME',0))}\n\n"
+        "🛡️ *Cobertura / fecha sugerida:*\n"
+        f"• ACPM: {cov('ACPM')}\n"
+        f"• Corriente: {cov('CORRIENTE')}\n"
+        f"• Supreme: {cov('SUPREME')}\n\n"
+        "🚚 *Carrotanques disponibles y descarga por compartimiento:*\n"
+        + bloque_carro("751") + "\n"
+        + bloque_carro("030") + "\n"
+        f"⚠️ *Riesgo:* {fecha_agot_info}\n"
+        f"📌 *Acción recomendada:* {accion}\n"
+        "—\n"
+        "(Enviado automáticamente por Predicción EDS Arauca)"
+    )
 
 
 
@@ -1496,10 +1513,15 @@ with colA:
             with st.expander("Ver JSON del reporte"):
                 st.json(rep, expanded=False)
 
-            # Mensaje formateado tipo WhatsApp
-            msg = _formatear_mensaje_whatsapp(rep)
+            # Mensaje formateado tipo WhatsApp (según decisión)
+            if rep.get("decision","").startswith("No pedir"):
+                msg = _armar_mensaje_no_pedir(rep)
+            else:
+                msg = _armar_mensaje_si_pedir(rep)
+
             st.markdown("**Mensaje (copia/pega / base de plantilla):**")
             st.code(msg, language="")
+
 
             # Resumen rápido con métricas
             st.markdown("**Resumen:**")
