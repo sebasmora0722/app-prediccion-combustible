@@ -1545,6 +1545,161 @@ with colB:
 
 
 
+# ============================================
+# ✉️ Envío por WhatsApp Cloud API (con TU token)
+# ============================================
+import os, requests, streamlit as st
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    TZ = ZoneInfo("America/Bogota")
+except Exception:
+    TZ = None
+
+# --- Respaldos hardcodeados (por si no usas secrets.toml) ---
+_HARDCODE_TOKEN = "EAAQzx8hnetoBPzPOaAZC2ZBG4SilPNfDHZAJM0k6X0JGApBxvsZCTTi5OiLeKicOBbvZBdiqUCpz7bAUQ1mhvOGQwg7ghj6yLy1yoxAZAGxasLYvhlLZBZBcdmMm9E8oyjv7hkrsDjClJOdwEk0AZC8lpoJjc3QFC1tskoxVI2LkymAzZAZAqgcV5HaLDXG8Ga0qzZAkZBwhRsXLw3w1B5vsYdYkG4VeCu8wd0jtA75fwbnMQn36hP5e1TdA1Nek6cZAzHXOrllxSQgzcNT0BWxHdY46HxbKSTQuDoqPZC5CAZDZD"
+_HARDCODE_PHONE_ID = "831673940033558"
+_HARDCODE_DESTINOS = "573209989823"
+
+def _get_secret(k, fallback):
+    return os.environ.get(k) or (st.secrets.get(k) if hasattr(st, "secrets") and k in st.secrets else None) or fallback
+
+WHATSAPP_TOKEN = _get_secret("WHATSAPP_TOKEN", _HARDCODE_TOKEN)
+WHATSAPP_PHONE_NUMBER_ID = _get_secret("WHATSAPP_PHONE_NUMBER_ID", _HARDCODE_PHONE_ID)
+DESTINATARIOS_DEFAULT = _get_secret("DESTINATARIOS", _HARDCODE_DESTINOS)
+
+def _now_hhmm():
+    now = datetime.now(TZ) if TZ else datetime.now()
+    return now.strftime("%H:%M")
+
+def _wa_send_template(phone: str, template: str, params: list[str]) -> dict:
+    url = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    body = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "template",
+        "template": {
+            "name": template,
+            "language": {"code": "es"},
+            "components": [
+                {"type": "body", "parameters": [{"type": "text", "text": str(p)} for p in params]}
+            ],
+        },
+    }
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    r = requests.post(url, json=body, headers=headers, timeout=30)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"status_code": r.status_code, "text": r.text}
+    return {"ok": r.status_code in (200, 201), "status": r.status_code, "resp": data}
+
+def _wa_send_text_test(phone: str, text: str) -> dict:
+    """Solo para PRUEBA con el número de prueba de Meta (no requiere plantilla)."""
+    url = f"https://graph.facebook.com/v21.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    body = {"messaging_product": "whatsapp", "to": phone, "type": "text", "text": {"body": text}}
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
+    r = requests.post(url, json=body, headers=headers, timeout=30)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"status_code": r.status_code, "text": r.text}
+    return {"ok": r.status_code in (200, 201), "status": r.status_code, "resp": data}
+
+# ---- Armado de parámetros (ya usa tus funciones existentes) ----
+def _fmt_gal(x):
+    try: return f"{float(x):,.1f}".replace(",", "")
+    except: return str(x)
+
+def _params_no_pedido(rep: dict) -> list[str]:
+    s = rep.get("stock_actual", {})
+    c = rep.get("cobertura", {})
+    cov = lambda p: c.get(p, ("—",""))[0]
+    return [
+        _now_hhmm(),
+        f"{_fmt_gal(s.get('ACPM',0))} gal",
+        f"{_fmt_gal(s.get('CORRIENTE',0))} gal",
+        f"{_fmt_gal(s.get('SUPREME',0))} gal",
+        cov("ACPM"),
+        cov("CORRIENTE"),
+        cov("SUPREME"),
+    ]
+
+def _params_si_pedir(rep: dict) -> list[str]:
+    s = rep.get("stock_actual", {})
+    r = rep.get("req_por_prod", {})
+    c = rep.get("cobertura", {})
+    planes = rep.get("planes", {})
+    def cov(prod):
+        dias_txt, f_sug = c.get(prod, ("—","Sin urgencia"))
+        return f"{dias_txt} — Fecha sugerida: {f_sug}"
+    def bloque(pl):
+        if not pl: return "(sin plan disponible)"
+        c1, c2, c3 = pl.get("c1",{}), pl.get("c2",{}), pl.get("c3",{})
+        rem = _fmt_gal(pl.get("remanente",0)); ap = pl.get("aprovechamiento_pct",0.0)
+        return (
+            f"• C1 ({c1.get('cap_txt','?')}): {c1.get('producto','-')} → {c1.get('tanque','-')} — {_fmt_gal(c1.get('gal',0))} gal\n"
+            f"• C2 ({c2.get('cap_txt','?')}): {c2.get('producto','-')} → {c2.get('tanque','-')} — {_fmt_gal(c2.get('gal',0))} gal\n"
+            f"• C3 ({c3.get('cap_txt','?')}): {c3.get('producto','-')} → {c3.get('tanque','-')} — {_fmt_gal(c3.get('gal',0))} gal\n"
+            f"Remanente: {rem} gal | Aprovechamiento: {ap:.1f}%"
+        )
+    bloque_751 = bloque(planes.get("751", {}))
+    bloque_030 = bloque(planes.get("030", {}))
+    return [
+        _now_hhmm(),
+        f"{_fmt_gal(s.get('ACPM',0))} gal",
+        f"{_fmt_gal(s.get('CORRIENTE',0))} gal",
+        f"{_fmt_gal(s.get('SUPREME',0))} gal",
+        _fmt_gal(r.get("ACPM",0)),
+        _fmt_gal(r.get("CORRIENTE",0)),
+        _fmt_gal(r.get("SUPREME",0)),
+        cov("ACPM"),
+        cov("CORRIENTE"),
+        cov("SUPREME"),
+        bloque_751,
+        bloque_030,
+        rep.get("riesgo",""),
+        rep.get("accion",""),
+    ]
+
+# ---- UI: botones ----
+st.markdown("### ✉️ Enviar reporte por WhatsApp")
+
+destinos = st.text_input(
+    "Destinatarios (57XXXXXXXXXX, separados por coma). Si lo dejas vacío uso el de configuración:",
+    value=""
+)
+
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("📤 Enviar WhatsApp (según decisión)"):
+        rep = generar_reporte_diario_para_whatsapp()
+        nums = [x.strip() for x in (destinos or DESTINATARIOS_DEFAULT or "").split(",") if x.strip()]
+        if not nums:
+            st.error("No hay destinatarios configurados.")
+        else:
+            if rep.get("decision","").startswith("No pedir"):
+                template = "eds_no_pedido_v1"   # crea esta plantilla en tu WABA
+                params = _params_no_pedido(rep)
+            else:
+                template = "eds_si_pedido_v2"   # crea esta plantilla en tu WABA
+                params = _params_si_pedir(rep)
+            out = []
+            for n in nums:
+                out.append((n, _wa_send_template(n, template, params)))
+            st.success("Envíos realizados")
+            st.json(out)
+
+with col2:
+    if st.button("🧪 Enviar PRUEBA (texto simple)"):
+        # Útil para probar rápido con el número de prueba de Meta (no requiere plantilla)
+        msg = "*Prueba Cloud API OK* " + _now_hhmm()
+        nums = [x.strip() for x in (destinos or DESTINATARIOS_DEFAULT or "").split(",") if x.strip()]
+        out = []
+        for n in nums:
+            out.append((n, _wa_send_text_test(n, msg)))
+        st.json(out)
+
 
                 
 
