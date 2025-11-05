@@ -1662,7 +1662,6 @@ def _params_si_pedir(rep: dict) -> list[str]:
         rep.get("accion",""),
     ]
 
-# ---- UI: botones ----
 st.markdown("### ✉️ Enviar reporte por WhatsApp")
 
 destinos = st.text_input(
@@ -1670,35 +1669,38 @@ destinos = st.text_input(
     value=""
 )
 
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("📤 Enviar WhatsApp (según decisión)"):
-        rep = generar_reporte_diario_para_whatsapp()
-        nums = [x.strip() for x in (destinos or DESTINATARIOS_DEFAULT or "").split(",") if x.strip()]
-        if not nums:
-            st.error("No hay destinatarios configurados.")
-        else:
-            if rep.get("decision","").startswith("No pedir"):
-                template = "eds_no_pedido_v1"   # crea esta plantilla en tu WABA
-                params = _params_no_pedido(rep)
-            else:
-                template = "eds_si_pedido_v2"   # crea esta plantilla en tu WABA
-                params = _params_si_pedir(rep)
-            out = []
-            for n in nums:
-                out.append((n, _wa_send_template(n, template, params)))
-            st.success("Envíos realizados")
-            st.json(out)
+def _build_text_from_rep(rep: dict) -> str:
+    # Reusa tus formateadores existentes
+    if rep.get("decision","").startswith("No pedir"):
+        return _armar_mensaje_no_pedir(rep)
+    else:
+        return _armar_mensaje_si_pedir(rep)
 
-with col2:
-    if st.button("🧪 Enviar PRUEBA (texto simple)"):
-        # Útil para probar rápido con el número de prueba de Meta (no requiere plantilla)
-        msg = "*Prueba Cloud API OK* " + _now_hhmm()
-        nums = [x.strip() for x in (destinos or DESTINATARIOS_DEFAULT or "").split(",") if x.strip()]
-        out = []
+if st.button("📤 Enviar WhatsApp (según decisión)"):
+    rep = generar_reporte_diario_para_whatsapp()
+    nums = [x.strip() for x in (destinos or DESTINATARIOS_DEFAULT or "").split(",") if x.strip()]
+    if not nums:
+        st.error("No hay destinatarios configurados.")
+    else:
+        results = []
+        # Elige plantilla según decisión (si existiera); si falla, caemos a texto
+        if rep.get("decision","").startswith("No pedir"):
+            template = "eds_no_pedido_v1"
+            params = _params_no_pedido(rep)
+        else:
+            template = "eds_si_pedido_v2"
+            params = _params_si_pedir(rep)
+
         for n in nums:
-            out.append((n, _wa_send_text_test(n, msg)))
-        st.json(out)
+            r = _wa_send_template(n, template, params)
+            if not r.get("ok"):
+                # Fallback automático a texto simple (sin plantilla)
+                msg_txt = _build_text_from_rep(rep)
+                r = _wa_send_text_test(n, msg_txt[:3900])  # margen bajo el límite
+                r["fallback"] = "sent_as_text"
+            results.append((n, r))
+        st.success("Intento de envío completado (con fallback si era necesario).")
+        st.json(results)
 
 
                 
