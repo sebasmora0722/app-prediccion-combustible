@@ -1543,6 +1543,70 @@ with colB:
     )
 
 
+# ============================
+# WhatsApp Cloud API - Envío simple (texto)
+# ============================
+import os, json, requests, streamlit as st
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("America/Bogota")
+except Exception:
+    _TZ = None
+
+def _wa_cfg():
+    """Lee credenciales desde secrets (sección [whatsapp])."""
+    w = st.secrets.get("whatsapp", {})
+    token = os.environ.get("WHATSAPP_TOKEN") or w.get("token")
+    phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID") or w.get("phone_number_id")
+    dests = os.environ.get("DESTINATARIOS") or w.get("destinatarios", "")
+    return token, phone_id, dests
+
+def _wa_send_text(to_phone: str, text: str) -> dict:
+    token, phone_id, _ = _wa_cfg()
+    if not token or not phone_id:
+        return {"ok": False, "error": "Faltan credenciales WhatsApp (token/phone_id). Revisa secrets.toml [whatsapp]."}
+    url = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
+    body = {"messaging_product": "whatsapp", "to": to_phone, "type": "text", "text": {"body": text}}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    r = requests.post(url, json=body, headers=headers, timeout=30)
+    try:
+        data = r.json()
+    except Exception:
+        data = {"status_code": r.status_code, "text": r.text}
+    return {"ok": r.status_code in (200, 201), "status": r.status_code, "resp": data}
+
+def _now_hhmm():
+    now = datetime.now(_TZ) if _TZ else datetime.now()
+    return now.strftime("%H:%M")
+
+# ------- UI mínima de envío -------
+st.markdown("### ✉️ WhatsApp — Envío simple (texto)")
+
+_w_token, _w_phone_id, _w_dests = _wa_cfg()
+st.caption(f"Phone ID: {_w_phone_id or '—'}")
+st.caption("Token (últimos 8): " + ((_w_token[-8:]) if _w_token else "VACÍO"))
+
+destinos_input = st.text_input(
+    "Destinatarios (57XXXXXXXXXX, separados por coma). Si lo dejas vacío uso los de secrets:",
+    value=""
+)
+
+# Mensaje de PRUEBA corto (para validar envío)
+msg_prueba = st.text_area("Mensaje a enviar (texto):", value=f"Prueba Cloud API OK 🟢 {_now_hhmm()}", height=80)
+
+if st.button("🧪 Enviar PRUEBA (texto simple)"):
+    nums = [x.strip() for x in (destinos_input or _w_dests).split(",") if x.strip()]
+    if not nums:
+        st.error("No hay destinatarios. Llena el campo o configura [whatsapp].destinatarios en secrets.toml")
+    elif not _w_token or not _w_phone_id:
+        st.error("Faltan credenciales de WhatsApp en secrets.toml → [whatsapp].")
+    else:
+        outs = []
+        for n in nums:
+            outs.append((n, _wa_send_text(n, msg_prueba[:3900])))
+        st.json(outs)
+        st.success("Intento de envío completado.")
 
 
 
