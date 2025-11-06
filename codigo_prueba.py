@@ -1557,7 +1557,7 @@ except Exception:
     TZ = None
 
 # --- Respaldos hardcodeados (por si no usas secrets.toml) ---
-_HARDCODE_TOKEN = "EAAQzx8hnetoBPZCStiFZCoEILw7ZA76exZBion59H26eIzeGlZALHsfAyhbcocLhubGNXsnIo9TP67KiDciRwcGHuRW0VNwGRY6TZCkZAONXHnUzjCHcXlZBbKeF6MLovYyqITPkXJywaW3hoTObXSkzjXRhkMlT0qURvZAIPYAEZCyZBQBg84pYQCWlS9vt59khCZC39ZART6kOwPS7K6avrY0jELExnxWgyhZCOcAWu2fBklyvZCqLbJ6g7KHNaomqvzbeFjQiCl0yPRJWRyBvuGqaC2wZCowuwHRNeozsvb6j"
+_HARDCODE_TOKEN = ""
 _HARDCODE_PHONE_ID = "831673940033558"
 _HARDCODE_DESTINOS = "573209989823"
 
@@ -1703,7 +1703,9 @@ if st.button("📤 Enviar WhatsApp (según decisión)"):
         st.json(results)
 
 
-                
+st.caption(f"📞 Phone ID: {WHATSAPP_PHONE_NUMBER_ID}")
+st.caption("🔑 Token en uso (últimos 10): " + (WHATSAPP_TOKEN[-10:] if WHATSAPP_TOKEN else "VACÍO"))
+               
 
 
 
